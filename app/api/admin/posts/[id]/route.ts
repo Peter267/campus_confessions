@@ -2,7 +2,10 @@ import { NextRequest, NextResponse } from 'next/server';
 import { isAdminRequest } from '@/lib/auth';
 import { setPostStatus } from '@/lib/posts';
 
-export async function PATCH(request: NextRequest, { params }: { params: { id: string } }) {
+export async function PATCH(
+  request: Request,          // ✅ 改为 Request
+  { params }: { params: { id: string } }
+) {
   if (!isAdminRequest(request)) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
@@ -14,7 +17,11 @@ export async function PATCH(request: NextRequest, { params }: { params: { id: st
     return NextResponse.json({ error: 'Invalid action' }, { status: 400 });
   }
 
-  const updated = await setPostStatus(params.id, action === 'approve' ? 'published' : 'rejected', action === 'reject' ? '管理员驳回' : null);
+  const updated = await setPostStatus(
+    params.id,
+    action === 'approve' ? 'published' : 'rejected',
+    action === 'reject' ? '管理员驳回' : null
+  );
 
   if (!updated) {
     return NextResponse.json({ error: '未找到帖子' }, { status: 404 });
