@@ -3,9 +3,11 @@ import { isAdminRequest } from '@/lib/auth';
 import { setPostStatus } from '@/lib/posts';
 
 export async function PATCH(
-  request: Request,          // ✅ 改为 Request
-  { params }: { params: { id: string } }
+  request: NextRequest,
+  { params }: { params: Promise<{ id: string }> }
 ) {
+  const { id } = await params;   // 重要：必须 await 才能拿到 id
+
   if (!isAdminRequest(request)) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
@@ -18,7 +20,7 @@ export async function PATCH(
   }
 
   const updated = await setPostStatus(
-    params.id,
+    id,                          // 使用解构后的 id
     action === 'approve' ? 'published' : 'rejected',
     action === 'reject' ? '管理员驳回' : null
   );
