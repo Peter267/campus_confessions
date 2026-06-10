@@ -1,0 +1,63 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  color-scheme: dark;
+  --bg-deep: #07111f;
+  --bg-mid: #0d1c31;
+  --panel: rgba(15, 23, 42, 0.62);
+  --paper: rgba(255, 255, 255, 0.08);
+  --accent: #82e4ff;
+  --accent-warm: #f7c56b;
+}
+
+html {
+  scroll-behavior: smooth;
+}
+
+body {
+  min-height: 100vh;
+  margin: 0;
+  background:
+    radial-gradient(circle at 20% 15%, rgba(130, 228, 255, 0.16), transparent 24%),
+    radial-gradient(circle at 82% 18%, rgba(247, 197, 107, 0.16), transparent 25%),
+    radial-gradient(circle at 50% 78%, rgba(56, 189, 248, 0.1), transparent 22%),
+    linear-gradient(180deg, #07111f 0%, #0b1527 42%, #08101d 100%);
+  color: white;
+  font-family: var(--font-body), 'Noto Sans SC', sans-serif;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+::selection {
+  background: rgba(130, 228, 255, 0.35);
+  color: white;
+}
+
+.page-grid {
+  position: relative;
+}
+
+.page-grid::before {
+  content: '';
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  opacity: 0.18;
+  background-image:
+    linear-gradient(rgba(255,255,255,0.025) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255,255,255,0.025) 1px, transparent 1px);
+  background-size: 44px 44px;
+  mask-image: radial-gradient(circle at center, black 50%, transparent 100%);
+}
+
+.font-display {
+  font-family: var(--font-display), 'Noto Serif SC', serif;
+}
+
+.glass-border {
+  border: 1px solid rgba(255,255,255,0.12);
+}
