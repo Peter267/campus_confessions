@@ -7,7 +7,12 @@ export async function GET() {
   return NextResponse.json({ error: 'Use the detail page loader for comments' }, { status: 405 });
 }
 
-export async function POST(request: NextRequest, { params }: { params: { id: string } }) {
+export async function POST(
+  request: NextRequest,
+  { params }: { params: Promise<{ id: string }> }   // ✅ 改为 Promise
+) {
+  const { id } = await params;   // ✅ 必须先 await 再解构
+
   const body = await request.json();
   const parsed = commentSchema.safeParse(body);
 
@@ -33,7 +38,7 @@ export async function POST(request: NextRequest, { params }: { params: { id: str
   }
 
   const comment = await addComment({
-    postId: params.id,
+    postId: id,                // ✅ 使用解构后的 id 代替原来的 params.id
     authorName,
     content: parsed.data.content
   });
