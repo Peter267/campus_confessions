@@ -17,30 +17,48 @@ export function HomeFeed({ initialPage }: { initialPage: FeedPage }) {
       return;
     }
 
+    let cancelled = false;
+    const controller = new AbortController();
+
     const observer = new IntersectionObserver(
       (entries) => {
         if (entries[0]?.isIntersecting && !loading) {
-          void loadMore();
+          void loadMore(controller.signal);
         }
       },
       { rootMargin: '480px' }
     );
 
     observer.observe(target);
-    return () => observer.disconnect();
+    return () => {
+      cancelled = true;
+      controller.abort();
+      observer.disconnect();
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [cursor, loading]);
 
-  async function loadMore() {
+  async function loadMore(signal?: AbortSignal) {
     if (!cursor || loading) {
       return;
     }
 
     setLoading(true);
-    const response = await fetch(`/api/posts?limit=12&cursor=${cursor}`);
-    const data = (await response.json()) as FeedPage;
-    setItems((current) => [...current, ...data.items]);
-    setCursor(data.nextCursor);
-    setLoading(false);
+    try {
+      const response = await fetch(`/api/posts?limit=12&cursor=${cursor}`, { signal });
+      if (!response.ok) {
+        return;
+      }
+      const data = (await response.json()) as FeedPage;
+      setItems((current) => [...current, ...data.items]);
+      setCursor(data.nextCursor);
+    } catch (error) {
+      if ((error as { name?: string })?.name !== 'AbortError') {
+        console.error('[home-feed] 加载更多失败', error);
+      }
+    } finally {
+      setLoading(false);
+    }
   }
 
   return (

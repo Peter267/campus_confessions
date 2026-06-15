@@ -4,8 +4,9 @@ import { DetailClient } from '@/components/detail-client';
 import { GlassPanel, Pill, SectionHeading } from '@/components/ui';
 import { getPostById, listComments } from '@/lib/posts';
 
-export default async function PostDetailPage({ params }: { params: { id: string } }) {
-  const post = await getPostById(params.id);
+export default async function PostDetailPage({ params }: { params: Promise<{ id: string }> }) {
+  const { id } = await params;
+  const post = await getPostById(id);
 
   if (!post || post.status !== 'published') {
     notFound();

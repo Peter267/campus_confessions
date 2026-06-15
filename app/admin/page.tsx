@@ -2,8 +2,7 @@ import { AdminDashboard } from '@/components/admin-dashboard';
 import { GlassPanel, SectionHeading } from '@/components/ui';
 import { getModerationSettings, listPendingPosts, listPublishedPostsByStatus } from '@/lib/posts';
 
-export default async function AdminPage({ searchParams }: { searchParams: { token?: string } }) {
-  const token = searchParams.token ?? '';
+export default async function AdminPage() {
   const pendingPosts = await listPendingPosts();
   const publishedPosts = await listPublishedPostsByStatus('published');
   const settings = await getModerationSettings();
@@ -14,13 +13,13 @@ export default async function AdminPage({ searchParams }: { searchParams: { toke
         <SectionHeading
           eyebrow="管理员后台"
           title="先审后发控制台"
-          description="用于审核投稿、管理敏感词、封禁代号与 IP。API 层必须携带管理口令，前台仅作为操作入口。"
+          description="用于审核投稿、管理敏感词、封禁代号与 IP。管理口令仅在浏览器会话内保存，不会写入 URL 历史。"
         />
         <div className="mt-4 rounded-2xl border border-amber-300/20 bg-amber-300/10 px-4 py-3 text-sm text-amber-50">
-          如果已设置 `ADMIN_TOKEN`，请通过查询参数 `/admin?token=你的口令` 进入操作态。
+          为避免口令泄露到浏览器历史与访问日志，入口不再支持 <code>?token=</code> 参数；首次操作时在弹窗中输入口令即可。
         </div>
         <div className="mt-8">
-          <AdminDashboard pendingPosts={pendingPosts} publishedPosts={publishedPosts} settings={settings} token={token} />
+          <AdminDashboard pendingPosts={pendingPosts} publishedPosts={publishedPosts} settings={settings} />
         </div>
       </GlassPanel>
     </main>

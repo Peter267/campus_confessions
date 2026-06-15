@@ -45,8 +45,12 @@ export const publishSchema = {
       fieldErrors.content = ['内容长度需在 10 到 1200 个字符之间'];
     }
 
-    if (imageUrl !== null && imageUrl.length > 100_000) {
-      fieldErrors.imageUrl = ['图片数据过大'];
+    if (imageUrl !== null) {
+      if (imageUrl.length > 2048) {
+        fieldErrors.imageUrl = ['图片地址过长'];
+      } else if (!/^https?:\/\//i.test(imageUrl)) {
+        fieldErrors.imageUrl = ['图片地址必须为 http(s) 链接'];
+      }
     }
 
     return Object.keys(fieldErrors).length > 0 ? failure(fieldErrors) : success({ alias, category, content, imageUrl });

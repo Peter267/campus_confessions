@@ -1,7 +1,9 @@
 "use client";
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import type { ModerationSettingsRecord, PostRecord } from '@/lib/types';
+
+const TOKEN_STORAGE_KEY = 'campus:admin-token';
 
 function joinLines(value: string[]) {
   return value.join('\n');
@@ -17,20 +19,42 @@ function splitLines(value: string) {
 export function AdminDashboard({
   pendingPosts,
   publishedPosts,
-  settings,
-  token
+  settings
 }: {
   pendingPosts: PostRecord[];
   publishedPosts: PostRecord[];
   settings: ModerationSettingsRecord;
-  token: string;
 }) {
+  const [token, setToken] = useState('');
+  const [tokenReady, setTokenReady] = useState(false);
   const [pending, setPending] = useState(pendingPosts);
   const [published, setPublished] = useState(publishedPosts);
   const [keywords, setKeywords] = useState(joinLines(settings.blocked_keywords));
   const [aliases, setAliases] = useState(joinLines(settings.blocked_aliases));
   const [ips, setIps] = useState(joinLines(settings.blocked_ips));
   const [notice, setNotice] = useState('');
+
+  useEffect(() => {
+    const stored = typeof window !== 'undefined' ? window.sessionStorage.getItem(TOKEN_STORAGE_KEY) ?? '' : '';
+    if (stored) {
+      setToken(stored);
+    }
+    setTokenReady(true);
+  }, []);
+
+  function persistToken(value: string) {
+    setToken(value);
+    if (typeof window !== 'undefined') {
+      window.sessionStorage.setItem(TOKEN_STORAGE_KEY, value);
+    }
+  }
+
+  function clearToken() {
+    setToken('');
+    if (typeof window !== 'undefined') {
+      window.sessionStorage.removeItem(TOKEN_STORAGE_KEY);
+    }
+  }
 
   async function movePost(id: string, action: 'approve' | 'reject') {
     const response = await fetch(`/api/admin/posts/${id}`, {
@@ -74,8 +98,56 @@ export function AdminDashboard({
     setNotice(response.ok ? '敏感词与封禁规则已更新' : '保存失败');
   }
 
+  if (!tokenReady) {
+    return null;
+  }
+
+  if (!token) {
+    return (
+      <form
+        onSubmit={(event) => {
+          event.preventDefault();
+          const formData = new FormData(event.currentTarget);
+          const value = String(formData.get('token') ?? '').trim();
+          if (!value) {
+            setNotice('请填写管理口令');
+            return;
+          }
+          persistToken(value);
+          setNotice('');
+        }}
+        className="space-y-4 rounded-[32px] border border-white/10 bg-white/6 p-6 backdrop-blur-xl"
+      >
+        <h3 className="font-display text-2xl text-white">输入管理口令</h3>
+        <p className="text-sm text-slate-300">
+          口令仅保存在当前浏览器会话（sessionStorage），不会写入 URL 或服务端日志。
+        </p>
+        <input
+          name="token"
+          type="password"
+          autoComplete="off"
+          placeholder="ADMIN_TOKEN"
+          className="w-full rounded-2xl border border-white/10 bg-slate-950/40 px-4 py-3 text-sm text-white outline-none focus:border-cyan-300/50"
+        />
+        <button type="submit" className="rounded-full bg-gradient-to-r from-amber-300 to-cyan-300 px-5 py-2.5 text-sm font-semibold text-slate-950">
+          进入后台
+        </button>
+        {notice ? <p className="text-sm text-amber-100">{notice}</p> : null}
+      </form>
+    );
+  }
+
   return (
     <div className="space-y-8">
+      <div className="flex items-center justify-end">
+        <button
+          onClick={clearToken}
+          className="rounded-full border border-white/10 bg-white/6 px-4 py-2 text-xs text-slate-200 transition hover:bg-white/10"
+        >
+          清除已保存的口令
+        </button>
+      </div>
+
       {notice ? <p className="rounded-2xl border border-white/10 bg-white/6 px-4 py-3 text-sm text-slate-100">{notice}</p> : null}
 
       <section className="grid gap-6 xl:grid-cols-[1.2fr_0.8fr]">
