@@ -2,6 +2,11 @@ import { AdminDashboard } from '@/components/admin-dashboard';
 import { GlassPanel, SectionHeading } from '@/components/ui';
 import { getModerationSettings, listPendingPosts, listPublishedPostsByStatus } from '@/lib/posts';
 
+// 必须强制动态：待审队列、规则面板、已发布列表都依赖最新 DB 状态，
+// 若任由 Next.js 缓存，DB 写入后再刷新就会拿不到。
+export const dynamic = 'force-dynamic';
+export const revalidate = 0;
+
 export default async function AdminPage() {
   const pendingPosts = await listPendingPosts();
   const publishedPosts = await listPublishedPostsByStatus('published');
