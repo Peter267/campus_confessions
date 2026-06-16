@@ -1,6 +1,8 @@
-fix(home): 主页与详情页及帖子接口禁用缓存，新审核通过的帖子立即可见
+feat: 缩小首页帖子卡片尺寸，新增全文搜索功能
 
-- app/page.tsx 加 force-dynamic + revalidate=0，瀑布流首屏拿最新已发布
-- app/post/[id]/page.tsx 同上，避免 ISR 让已通过/已驳回的状态不一致
-- /api/posts、/api/posts/[id]、/api/posts/[id]/like、/api/posts/[id]/comments
-  全部加 force-dynamic
+- PostCard 高度从 330px 缩至 180px/140px，圆角/间距/字号同步缩小
+- 新增 searchPosts 函数，支持内容/代号/分类模糊搜索 (ilike)
+- api/posts GET 新增 q 参数，有搜索词时走 searchPosts
+- 新增 HomeSection 客户端组件，包含搜索输入框 + 清除按钮
+- HomeFeed 支持 searchQuery prop，搜索模式下显示结果替代无限滚动
+- 瀑布流改为 CSS columns 布局，替代未定义的 masonry 类

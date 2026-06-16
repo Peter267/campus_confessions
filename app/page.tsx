@@ -1,5 +1,5 @@
 import Link from 'next/link';
-import { HomeFeed } from '@/components/home-feed';
+import { HomeSection } from '@/components/home-section';
 import { GlassPanel, Pill, SectionHeading } from '@/components/ui';
 import { listPublishedPosts } from '@/lib/posts';
 
@@ -62,14 +62,14 @@ export default async function HomePage() {
           <SectionHeading
             eyebrow="异步瀑布流"
             title="审核通过的投稿"
-            description="支持无限滚动加载，卡片采用随机渐变匿名头像、发布时间、点赞与评论入口。"
+            description="支持无限滚动加载与关键词搜索，卡片采用随机渐变匿名头像、发布时间、点赞与评论入口。"
           />
           <Link href="/publish" className="hidden rounded-full border border-white/10 bg-white/6 px-4 py-2 text-sm text-slate-100 transition hover:bg-white/10 md:inline-flex">
             + 新投稿
           </Link>
         </div>
 
-        <HomeFeed initialPage={initialPage} />
+        <HomeSection initialPage={initialPage} />
       </section>
 
       <Link

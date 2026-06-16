@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { createPost, getModerationSettings, listPublishedPosts } from '@/lib/posts';
+import { createPost, getModerationSettings, listPublishedPosts, searchPosts } from '@/lib/posts';
 import { findBlockedKeyword, getBaseModerationSettings, resolveClientIp, sanitizeAlias } from '@/lib/moderation';
 import { publishSchema } from '@/lib/validators';
 
@@ -8,6 +8,13 @@ export const dynamic = 'force-dynamic';
 export const revalidate = 0;
 
 export async function GET(request: NextRequest) {
+  const q = request.nextUrl.searchParams.get('q') ?? '';
+
+  if (q.trim()) {
+    const items = await searchPosts(q);
+    return NextResponse.json({ items, nextCursor: null });
+  }
+
   const limit = Number(request.nextUrl.searchParams.get('limit') ?? '12');
   const cursor = request.nextUrl.searchParams.get('cursor') ?? undefined;
   const result = await listPublishedPosts(limit, cursor);

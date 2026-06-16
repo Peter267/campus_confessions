@@ -47,6 +47,29 @@ export async function listPublishedPosts(limit = 12, cursor?: string): Promise<F
   return { items, nextCursor };
 }
 
+export async function searchPosts(query: string, limit = 24): Promise<PostRecord[]> {
+  const safeLimit = Math.min(Math.max(limit, 1), 50);
+  const safeQuery = `%${query.trim()}%`;
+
+  if (!sql) {
+    const q = query.trim().toLowerCase();
+    return demoPosts
+      .filter((item) => item.status === 'published')
+      .filter((item) => item.content.toLowerCase().includes(q) || item.alias.toLowerCase().includes(q) || item.category.toLowerCase().includes(q))
+      .sort((left, right) => new Date(right.created_at).getTime() - new Date(left.created_at).getTime())
+      .slice(0, safeLimit);
+  }
+
+  return await fetchPosts`
+    select *
+    from posts
+    where status = 'published'
+      and (content ilike ${safeQuery} or alias ilike ${safeQuery} or category ilike ${safeQuery})
+    order by created_at desc
+    limit ${safeLimit}
+  `;
+}
+
 export async function listPendingPosts(limit = 24) {
   if (!sql) {
     return demoPosts.filter((item) => item.status === 'pending').slice(0, Math.min(Math.max(limit, 1), 50));
