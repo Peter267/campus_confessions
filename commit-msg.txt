@@ -1,0 +1,6 @@
+fix(home): 主页与详情页及帖子接口禁用缓存，新审核通过的帖子立即可见
+
+- app/page.tsx 加 force-dynamic + revalidate=0，瀑布流首屏拿最新已发布
+- app/post/[id]/page.tsx 同上，避免 ISR 让已通过/已驳回的状态不一致
+- /api/posts、/api/posts/[id]、/api/posts/[id]/like、/api/posts/[id]/comments
+  全部加 force-dynamic

@@ -3,6 +3,10 @@ import { createPost, getModerationSettings, listPublishedPosts } from '@/lib/pos
 import { findBlockedKeyword, getBaseModerationSettings, resolveClientIp, sanitizeAlias } from '@/lib/moderation';
 import { publishSchema } from '@/lib/validators';
 
+// 防止首页瀑布流拉到陈旧数据：新审核通过的帖子必须立刻出现在下一次 GET。
+export const dynamic = 'force-dynamic';
+export const revalidate = 0;
+
 export async function GET(request: NextRequest) {
   const limit = Number(request.nextUrl.searchParams.get('limit') ?? '12');
   const cursor = request.nextUrl.searchParams.get('cursor') ?? undefined;

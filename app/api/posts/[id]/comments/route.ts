@@ -3,6 +3,9 @@ import { addComment, getModerationSettings } from '@/lib/posts';
 import { findBlockedKeyword, getBaseModerationSettings, resolveClientIp, sanitizeAlias } from '@/lib/moderation';
 import { commentSchema } from '@/lib/validators';
 
+export const dynamic = 'force-dynamic';
+export const revalidate = 0;
+
 export async function GET() {
   return NextResponse.json({ error: 'Use the detail page loader for comments' }, { status: 405 });
 }

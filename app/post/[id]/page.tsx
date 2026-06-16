@@ -4,6 +4,10 @@ import { DetailClient } from '@/components/detail-client';
 import { GlassPanel, Pill, SectionHeading } from '@/components/ui';
 import { getPostById, listComments } from '@/lib/posts';
 
+// 详情页同理：admin 一通过就要可访问；并避免 ISR 把已驳回帖子继续返回 200。
+export const dynamic = 'force-dynamic';
+export const revalidate = 0;
+
 export default async function PostDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
   const post = await getPostById(id);

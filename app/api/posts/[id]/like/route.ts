@@ -1,6 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { incrementLike } from '@/lib/posts';
 
+export const dynamic = 'force-dynamic';
+export const revalidate = 0;
+
 export async function POST(
   _: NextRequest,
   { params }: { params: Promise<{ id: string }> }   // ✅ 改为 Promise

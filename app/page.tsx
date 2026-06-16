@@ -3,6 +3,11 @@ import { HomeFeed } from '@/components/home-feed';
 import { GlassPanel, Pill, SectionHeading } from '@/components/ui';
 import { listPublishedPosts } from '@/lib/posts';
 
+// 主页依赖最新已发布列表：admin 通过一条就要立刻在首页可见，
+// 静态化会让发布审核操作看上去"没生效"。
+export const dynamic = 'force-dynamic';
+export const revalidate = 0;
+
 export default async function HomePage() {
   const initialPage = await listPublishedPosts(12);
 
