@@ -1,6 +1,6 @@
 import { sql } from '@/lib/db';
 import { demoComments, demoModerationSettings, demoPosts } from '@/lib/demo-data';
-import { CommentRecord, FeedPage, ModerationSettingsRecord, PostRecord, PostStatus } from '@/lib/types';
+import { AnnouncementRecord, AuditLogRecord, CategoryRecord, CommentRecord, FeedPage, ModerationSettingsRecord, PostRecord, PostStatus, ReportRecord } from '@/lib/types';
 
 async function fetchPosts(query: TemplateStringsArray, ...values: unknown[]) {
   if (!sql) {
@@ -120,6 +120,8 @@ export async function createPost(input: {
   imageUrl?: string | null;
   status: PostStatus;
   moderationReason?: string | null;
+  ipAddress?: string | null;
+  tags?: string[];
 }) {
   if (!sql) {
     const createdAt = new Date().toISOString();
@@ -135,7 +137,9 @@ export async function createPost(input: {
       like_count: 0,
       comment_count: 0,
       created_at: createdAt,
-      published_at: input.status === 'published' ? createdAt : null
+      published_at: input.status === 'published' ? createdAt : null,
+      ip_address: input.ipAddress ?? null,
+      tags: input.tags ?? []
     };
 
     demoPosts.unshift(record);
@@ -143,7 +147,7 @@ export async function createPost(input: {
   }
 
   const rows = (await sql`
-    insert into posts (category, alias, author_name, content, image_url, status, moderation_reason, published_at)
+    insert into posts (category, alias, author_name, content, image_url, status, moderation_reason, published_at, ip_address)
     values (
       ${input.category},
       ${input.alias},
@@ -152,12 +156,19 @@ export async function createPost(input: {
       ${input.imageUrl ?? null},
       ${input.status},
       ${input.moderationReason ?? null},
-      ${input.status === 'published' ? new Date().toISOString() : null}
+      ${input.status === 'published' ? new Date().toISOString() : null},
+      ${input.ipAddress ?? null}
     )
     returning *
   `) as PostRecord[];
 
-  return rows[0];
+  const record = rows[0];
+
+  if (input.tags && input.tags.length > 0) {
+    await addPostTags(record.id, input.tags);
+  }
+
+  return record;
 }
 
 export async function setPostStatus(id: string, status: PostStatus, moderationReason?: string | null) {
@@ -287,4 +298,117 @@ export async function updateModerationSettings(input: ModerationSettingsRecord) 
   `) as ModerationSettingsRecord[];
 
   return rows[0];
+}
+
+// --- Announcements ---
+export async function getAnnouncement(): Promise<AnnouncementRecord> {
+  if (!sql) return { id: 1, content: '### 公告\n欢迎来到校园万能墙', created_at: new Date().toISOString(), updated_at: new Date().toISOString() };
+  const rows = await sql`select * from announcements where id = 1 limit 1` as AnnouncementRecord[];
+  return rows[0] ?? { id: 1, content: '', created_at: new Date().toISOString(), updated_at: new Date().toISOString() };
+}
+
+export async function updateAnnouncement(content: string): Promise<AnnouncementRecord> {
+  if (!sql) return { id: 1, content, created_at: new Date().toISOString(), updated_at: new Date().toISOString() };
+  const rows = await sql`update announcements set content = ${content}, updated_at = now() where id = 1 returning *` as AnnouncementRecord[];
+  return rows[0];
+}
+
+// --- Categories ---
+export async function listCategories(): Promise<CategoryRecord[]> {
+  if (!sql) return [
+    { id: 'cat-1', name: '表白', slug: 'confession', parent_id: null, sort_order: 1, created_at: new Date().toISOString() },
+    { id: 'cat-2', name: '万能墙', slug: 'general', parent_id: null, sort_order: 2, created_at: new Date().toISOString() },
+    { id: 'cat-3', name: '失物招领', slug: 'lost-found', parent_id: null, sort_order: 3, created_at: new Date().toISOString() },
+    { id: 'cat-4', name: '日常吐槽', slug: 'daily-rant', parent_id: null, sort_order: 4, created_at: new Date().toISOString() },
+  ];
+  return await sql`select * from categories order by sort_order asc, created_at asc` as CategoryRecord[];
+}
+
+export async function createCategory(name: string, slug: string, parentId?: string | null): Promise<CategoryRecord> {
+  const rows = await sql`insert into categories (name, slug, parent_id, sort_order) values (${name}, ${slug}, ${parentId ?? null}, 0) returning *` as CategoryRecord[];
+  return rows[0];
+}
+
+export async function updateCategory(id: string, data: { name?: string; slug?: string; parent_id?: string | null; sort_order?: number }): Promise<CategoryRecord | null> {
+  const sets: unknown[] = [];
+  if (data.name !== undefined) {
+    sets.push(sql`name = ${data.name}`);
+  }
+  if (data.slug !== undefined) {
+    sets.push(sql`slug = ${data.slug}`);
+  }
+  if (data.parent_id !== undefined) {
+    sets.push(sql`parent_id = ${data.parent_id}`);
+  }
+  if (data.sort_order !== undefined) {
+    sets.push(sql`sort_order = ${data.sort_order}`);
+  }
+  if (sets.length === 0) return null;
+  const rows = await sql`update categories set ${sql(sets)} where id = ${id} returning *` as CategoryRecord[];
+  return rows[0] ?? null;
+}
+
+export async function deleteCategory(id: string): Promise<boolean> {
+  await sql`delete from categories where id = ${id}`;
+  return true;
+}
+
+// --- Posts with tags ---
+export async function addPostTags(postId: string, tags: string[]) {
+  if (!sql || tags.length === 0) return;
+  const values = tags.map((tag) => ({ post_id: postId, tag: tag.trim().toLowerCase() }));
+  for (const v of values) {
+    await sql`insert into post_tags (post_id, tag) values (${v.post_id}, ${v.tag}) on conflict do nothing`;
+  }
+}
+
+export async function getPostTags(postId: string): Promise<string[]> {
+  if (!sql) return [];
+  const rows = await sql`select tag from post_tags where post_id = ${postId}` as { tag: string }[];
+  return rows.map((r) => r.tag);
+}
+
+// --- Reports ---
+export async function createReport(postId: string, reason: string): Promise<ReportRecord> {
+  if (!sql) return { id: 'demo-report', post_id: postId, reason, created_at: new Date().toISOString() };
+  const rows = await sql`insert into reports (post_id, reason) values (${postId}, ${reason}) returning *` as ReportRecord[];
+  return rows[0];
+}
+
+export async function listReports(): Promise<ReportRecord[]> {
+  if (!sql) return [];
+  return await sql`select * from reports order by created_at desc` as ReportRecord[];
+}
+
+// --- Audit Logs ---
+export async function createAuditLog(action: string, postId: string | null, tokenHash: string, reason?: string | null): Promise<AuditLogRecord> {
+  if (!sql) return { id: 'demo-log', action, post_id: postId, admin_token_hash: tokenHash, reason: reason ?? null, created_at: new Date().toISOString() };
+  const rows = await sql`insert into audit_logs (action, post_id, admin_token_hash, reason) values (${action}, ${postId}, ${tokenHash}, ${reason ?? null}) returning *` as AuditLogRecord[];
+  return rows[0];
+}
+
+export async function listAuditLogs(limit = 50): Promise<AuditLogRecord[]> {
+  if (!sql) return [];
+  return await sql`select * from audit_logs order by created_at desc limit ${limit}` as AuditLogRecord[];
+}
+
+// --- Delete Post ---
+export async function deletePost(id: string): Promise<boolean> {
+  if (!sql) {
+    const idx = demoPosts.findIndex((p) => p.id === id);
+    if (idx >= 0) { demoPosts.splice(idx, 1); return true; }
+    return false;
+  }
+  await sql`delete from posts where id = ${id}`;
+  return true;
+}
+
+// --- Admin Search ---
+export async function adminSearchPosts(query: string, limit = 50): Promise<PostRecord[]> {
+  const safeQuery = `%${query.trim()}%`;
+  if (!sql) {
+    const q = query.trim().toLowerCase();
+    return demoPosts.filter((p) => p.content.toLowerCase().includes(q) || p.alias.toLowerCase().includes(q) || p.category.toLowerCase().includes(q)).slice(0, limit);
+  }
+  return await fetchPosts`select * from posts where content ilike ${safeQuery} or alias ilike ${safeQuery} or category ilike ${safeQuery} order by created_at desc limit ${limit}`;
 }

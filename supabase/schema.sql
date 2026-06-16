@@ -39,3 +39,60 @@ create table if not exists moderation_settings (
 insert into moderation_settings (id)
 values (1)
 on conflict (id) do nothing;
+
+-- IP address column for posts
+alter table posts add column if not exists ip_address text;
+
+-- Categories table
+create table if not exists categories (
+  id uuid primary key default gen_random_uuid(),
+  name text not null,
+  slug text not null unique,
+  parent_id uuid references categories(id) on delete set null,
+  sort_order integer not null default 0,
+  created_at timestamptz not null default now()
+);
+
+-- Default categories
+insert into categories (name, slug, sort_order) values ('表白', 'confession', 1) on conflict (slug) do nothing;
+insert into categories (name, slug, sort_order) values ('万能墙', 'general', 2) on conflict (slug) do nothing;
+insert into categories (name, slug, sort_order) values ('失物招领', 'lost-found', 3) on conflict (slug) do nothing;
+insert into categories (name, slug, sort_order) values ('日常吐槽', 'daily-rant', 4) on conflict (slug) do nothing;
+
+-- Post tags
+create table if not exists post_tags (
+  post_id uuid not null references posts(id) on delete cascade,
+  tag text not null,
+  primary key (post_id, tag)
+);
+
+-- Announcements
+create table if not exists announcements (
+  id serial primary key,
+  content text not null default '',
+  updated_at timestamptz not null default now()
+);
+
+insert into announcements (id, content) values (1, '### 校园万能墙公告
+
+请勿发布人身攻击、造谣、隐私曝光、违规引战内容；所有投稿均会进入服务端审查链路。
+
+校园墙只保留匿名表达，不展示传统博客评论区痕迹，页面交互与视觉均按现代社交产品设计。') on conflict (id) do nothing;
+
+-- Reports
+create table if not exists reports (
+  id uuid primary key default gen_random_uuid(),
+  post_id uuid not null references posts(id) on delete cascade,
+  reason text not null,
+  created_at timestamptz not null default now()
+);
+
+-- Audit logs
+create table if not exists audit_logs (
+  id uuid primary key default gen_random_uuid(),
+  action text not null,
+  post_id uuid references posts(id) on delete set null,
+  admin_token_hash text not null,
+  reason text,
+  created_at timestamptz not null default now()
+);

@@ -52,7 +52,9 @@ export async function POST(request: NextRequest) {
     content: parsed.data.content,
     imageUrl: parsed.data.imageUrl ?? null,
     status,
-    moderationReason
+    moderationReason,
+    ipAddress: ip,
+    tags: (parsed.data as { tags?: string[] }).tags ?? [],
   });
 
   if (status === 'rejected') {

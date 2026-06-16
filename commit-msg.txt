@@ -1,8 +1,34 @@
-feat: 缩小首页帖子卡片尺寸，新增全文搜索功能
+feat: 全面 UI 重构 + 公告系统 + 分类标签 + 举报删除 + 操作日志
 
-- PostCard 高度从 330px 缩至 180px/140px，圆角/间距/字号同步缩小
-- 新增 searchPosts 函数，支持内容/代号/分类模糊搜索 (ilike)
-- api/posts GET 新增 q 参数，有搜索词时走 searchPosts
-- 新增 HomeSection 客户端组件，包含搜索输入框 + 清除按钮
-- HomeFeed 支持 searchQuery prop，搜索模式下显示结果替代无限滚动
-- 瀑布流改为 CSS columns 布局，替代未定义的 masonry 类
+1. 导航栏重构 (Flarum/Discourse 风格):
+   - Banner 从大玻璃面板改为紧凑顶栏，移动端优先
+   - 公告从 banner 移入右侧公告侧边栏（lg+ 屏幕可见）
+   - 新增 CategoryNav 分类导航栏，支持 ?category= 筛选
+
+2. 公告系统:
+   - 新增 announcements 表 + announcement-sidebar 组件
+   - 控制台"公告编辑"tab：Markdown 编辑 + 实时预览 + 保存
+   - 支持 ## / ### / - 列表 / 段落格式
+
+3. 分类与标签系统:
+   - 新增 categories 表 + post_tags 表
+   - 4 个默认分类（表白/万能墙/失物招领/日常吐槽）
+   - 控制台"分类管理"tab：完整的 CRUD 操作
+   - createPost 支持 tags 参数
+
+4. 内容管理:
+   - 详情页新增举报按钮（预设理由：人身攻击/隐私曝光/违规内容/广告引流/其他）
+   - 新增 /api/reports 接口
+   - 管理员新增"删除"按钮（待审 + 已发布列表）
+   - 新增 audit_logs 表，记录删除操作（管理员/时间/原因）
+
+5. 控制台增强:
+   - 6 标签页导航：待审核/已发布/分类管理/公告编辑/规则面板/操作日志
+   - 已发布 tab 新增管理员搜索栏 + /api/admin/search
+   - 待审核/已发布列表显示 IP 地址（新增 ip_address 列）
+   - 通过 createPost 时自动记录客户端 IP
+
+6. 数据层:
+   - lib/types.ts 新增 5 个接口
+   - lib/posts.ts 新增 14 个函数
+   - schema.sql 新增 5 张表 + ip_address 列

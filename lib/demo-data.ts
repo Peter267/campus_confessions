@@ -23,7 +23,8 @@ export const demoPosts: PostRecord[] = [
     like_count: 126,
     comment_count: 14,
     created_at: new Date(now - 1000 * 60 * 60 * 28).toISOString(),
-    published_at: new Date(now - 1000 * 60 * 60 * 27).toISOString()
+    published_at: new Date(now - 1000 * 60 * 60 * 27).toISOString(),
+    ip_address: null
   },
   {
     id: 'demo-2',
@@ -37,7 +38,8 @@ export const demoPosts: PostRecord[] = [
     like_count: 61,
     comment_count: 8,
     created_at: new Date(now - 1000 * 60 * 60 * 18).toISOString(),
-    published_at: new Date(now - 1000 * 60 * 60 * 18).toISOString()
+    published_at: new Date(now - 1000 * 60 * 60 * 18).toISOString(),
+    ip_address: null
   },
   {
     id: 'demo-3',
@@ -51,7 +53,8 @@ export const demoPosts: PostRecord[] = [
     like_count: 203,
     comment_count: 32,
     created_at: new Date(now - 1000 * 60 * 60 * 12).toISOString(),
-    published_at: new Date(now - 1000 * 60 * 60 * 12).toISOString()
+    published_at: new Date(now - 1000 * 60 * 60 * 12).toISOString(),
+    ip_address: null
   },
   {
     id: 'demo-4',
@@ -65,7 +68,8 @@ export const demoPosts: PostRecord[] = [
     like_count: 94,
     comment_count: 21,
     created_at: new Date(now - 1000 * 60 * 60 * 6).toISOString(),
-    published_at: new Date(now - 1000 * 60 * 60 * 6).toISOString()
+    published_at: new Date(now - 1000 * 60 * 60 * 6).toISOString(),
+    ip_address: null
   }
 ];
 

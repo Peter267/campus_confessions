@@ -15,6 +15,8 @@ export interface PostRecord {
   comment_count: number;
   created_at: string;
   published_at: string | null;
+  ip_address?: string | null;
+  tags?: string[];
 }
 
 export interface CommentRecord {
@@ -29,6 +31,38 @@ export interface ModerationSettingsRecord {
   blocked_keywords: string[];
   blocked_aliases: string[];
   blocked_ips: string[];
+}
+
+export interface AnnouncementRecord {
+  id: number;
+  content: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface CategoryRecord {
+  id: string;
+  name: string;
+  slug: string;
+  parent_id: string | null;
+  sort_order: number;
+  created_at: string;
+}
+
+export interface ReportRecord {
+  id: string;
+  post_id: string;
+  reason: string;
+  created_at: string;
+}
+
+export interface AuditLogRecord {
+  id: string;
+  action: string;
+  post_id: string | null;
+  admin_token_hash: string;
+  reason: string | null;
+  created_at: string;
 }
 
 export interface FeedPage {

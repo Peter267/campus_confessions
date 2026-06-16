@@ -15,6 +15,10 @@ export function DetailClient({ post, comments }: { post: PostRecord; comments: C
   const [authorName, setAuthorName] = useState('路过同学');
   const [content, setContent] = useState('');
   const [submitting, setSubmitting] = useState(false);
+  const [showReport, setShowReport] = useState(false);
+  const [reportReason, setReportReason] = useState('');
+  const [reporting, setReporting] = useState(false);
+  const [reportDone, setReportDone] = useState(false);
 
   async function likePost() {
     setLikeCount((current) => current + 1);
@@ -24,24 +28,32 @@ export function DetailClient({ post, comments }: { post: PostRecord; comments: C
 
   async function submitComment(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (!content.trim()) {
-      return;
-    }
-
+    if (!content.trim()) return;
     setSubmitting(true);
     const response = await fetch(`/api/posts/${post.id}/comments`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ authorName, content })
     });
-
     if (response.ok) {
       const payload = (await response.json()) as CommentRecord;
       setCommentList((current) => [...current, payload]);
       setContent('');
     }
-
     setSubmitting(false);
+  }
+
+  async function submitReport(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!reportReason.trim()) return;
+    setReporting(true);
+    await fetch('/api/reports', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ postId: post.id, reason: reportReason })
+    });
+    setReportDone(true);
+    setReporting(false);
   }
 
   return (
@@ -61,7 +73,30 @@ export function DetailClient({ post, comments }: { post: PostRecord; comments: C
                 ♥ {likeCount}
               </button>
               <span className="text-sm text-slate-400">{post.alias || '匿名同学'}</span>
+              <button onClick={() => setShowReport(!showReport)} className="ml-auto rounded-full border border-red-400/15 bg-red-400/5 px-3 py-1.5 text-xs text-red-200/60 transition hover:bg-red-400/10 hover:text-red-200">
+                {reportDone ? '已举报' : '举报'}
+              </button>
             </div>
+            {showReport && !reportDone && (
+              <form onSubmit={submitReport} className="rounded-2xl border border-red-400/15 bg-red-400/5 p-4">
+                <p className="mb-2 text-xs text-slate-300">请选择举报理由：</p>
+                <div className="flex flex-wrap gap-2 mb-3">
+                  {['人身攻击', '隐私曝光', '违规内容', '广告引流', '其他'].map((reason) => (
+                    <button key={reason} type="button" onClick={() => setReportReason(reason)} className={`rounded-full border px-3 py-1 text-xs transition ${reportReason === reason ? 'border-red-300/40 bg-red-400/15 text-red-100' : 'border-white/10 text-slate-400 hover:bg-white/6'}`}>
+                      {reason}
+                    </button>
+                  ))}
+                </div>
+                <div className="flex gap-2">
+                  <button type="submit" disabled={reporting || !reportReason} className="rounded-full bg-red-400/15 px-4 py-2 text-xs text-red-100 transition hover:bg-red-400/25 disabled:opacity-50">
+                    {reporting ? '提交中...' : '提交举报'}
+                  </button>
+                  <button type="button" onClick={() => setShowReport(false)} className="rounded-full border border-white/10 px-4 py-2 text-xs text-slate-400 hover:text-white">
+                    取消
+                  </button>
+                </div>
+              </form>
+            )}
           </div>
         </article>
 
