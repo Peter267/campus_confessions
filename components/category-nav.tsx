@@ -1,11 +1,10 @@
 "use client";
 
 import Link from 'next/link';
-import { usePathname, useSearchParams } from 'next/navigation';
+import { useSearchParams } from 'next/navigation';
 import type { CategoryRecord } from '@/lib/types';
 
 export function CategoryNav({ categories }: { categories: CategoryRecord[] }) {
-  const pathname = usePathname();
   const searchParams = useSearchParams();
   const currentCategory = searchParams.get('category') ?? '';
 
