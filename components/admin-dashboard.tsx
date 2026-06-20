@@ -89,6 +89,8 @@ export function AdminDashboard({
 
   useEffect(() => {
     const stored = typeof window !== 'undefined' ? window.sessionStorage.getItem(TOKEN_STORAGE_KEY) ?? '' : '';
+    // setTokenReady 用于标记客户端已 hydrate，是 useEffect 同步外部 sessionStorage 的合法用例。
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setTokenReady(true);
     if (stored) {
       setToken(stored);

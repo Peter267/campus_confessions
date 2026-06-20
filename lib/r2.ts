@@ -97,5 +97,6 @@ export async function presignGetUrl(config: R2Config, key: string, expiresIn = 6
 }
 
 export function publicUrl(config: R2Config, key: string): string {
-  return `${config.publicBase}/${key}`;
+  const base = config.publicBase.replace(/\/+$/, '');
+  return `${base}/${key.replace(/^\/+/, '')}`;
 }

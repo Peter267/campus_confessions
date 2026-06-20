@@ -7,7 +7,7 @@ async function fetchPosts(query: TemplateStringsArray, ...values: unknown[]) {
     return [] as PostRecord[];
   }
 
-  return (await sql(query, ...values)) as PostRecord[];
+  return (await sql(query as unknown as string, values)) as PostRecord[];
 }
 
 export async function listPublishedPosts(limit = 12, cursor?: string): Promise<FeedPage> {
@@ -325,30 +325,46 @@ export async function listCategories(): Promise<CategoryRecord[]> {
 }
 
 export async function createCategory(name: string, slug: string, parentId?: string | null): Promise<CategoryRecord> {
+  if (!sql) {
+    return { id: `demo-cat-${Math.random().toString(36).slice(2, 8)}`, name, slug, parent_id: parentId ?? null, sort_order: 0, created_at: new Date().toISOString() };
+  }
   const rows = await sql`insert into categories (name, slug, parent_id, sort_order) values (${name}, ${slug}, ${parentId ?? null}, 0) returning *` as CategoryRecord[];
   return rows[0];
 }
 
 export async function updateCategory(id: string, data: { name?: string; slug?: string; parent_id?: string | null; sort_order?: number }): Promise<CategoryRecord | null> {
-  const sets: unknown[] = [];
+  if (!sql) return null;
+  const setClauses: string[] = [];
+  const setParams: unknown[] = [];
+  let i = 1;
   if (data.name !== undefined) {
-    sets.push(sql`name = ${data.name}`);
+    setClauses.push(`name = $${i++}`);
+    setParams.push(data.name);
   }
   if (data.slug !== undefined) {
-    sets.push(sql`slug = ${data.slug}`);
+    setClauses.push(`slug = $${i++}`);
+    setParams.push(data.slug);
   }
   if (data.parent_id !== undefined) {
-    sets.push(sql`parent_id = ${data.parent_id}`);
+    setClauses.push(`parent_id = $${i++}`);
+    setParams.push(data.parent_id);
   }
   if (data.sort_order !== undefined) {
-    sets.push(sql`sort_order = ${data.sort_order}`);
+    setClauses.push(`sort_order = $${i++}`);
+    setParams.push(data.sort_order);
   }
-  if (sets.length === 0) return null;
-  const rows = await sql`update categories set ${sql(sets)} where id = ${id} returning *` as CategoryRecord[];
+  if (setClauses.length === 0) return null;
+  const unsafe = (sql as unknown as { unsafe: (q: string, ...params: unknown[]) => Promise<unknown> }).unsafe;
+  const rows = (await unsafe(
+    `update categories set ${setClauses.join(', ')} where id = $${i} returning *`,
+    ...setParams,
+    id
+  )) as CategoryRecord[];
   return rows[0] ?? null;
 }
 
 export async function deleteCategory(id: string): Promise<boolean> {
+  if (!sql) return true;
   await sql`delete from categories where id = ${id}`;
   return true;
 }

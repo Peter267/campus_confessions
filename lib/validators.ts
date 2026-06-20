@@ -20,7 +20,14 @@ function toText(value: unknown) {
 }
 
 function normalizeList(value: unknown) {
-  return Array.isArray(value) ? value.map((item) => toText(item)).filter(Boolean) : [];
+  if (Array.isArray(value)) {
+    return value.map((item) => toText(item)).filter(Boolean);
+  }
+  // 兼容逗号或换行分隔的字符串，便于从管理后台直接发送
+  if (typeof value === 'string') {
+    return value.split(/[\n,，]/).map((item) => item.trim()).filter(Boolean);
+  }
+  return [];
 }
 
 export const publishSchema = {

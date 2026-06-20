@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import type { FeedPage, PostRecord } from '@/lib/types';
 import { PostCard } from '@/components/post-card';
 import { SkeletonCard } from '@/components/ui';
@@ -14,10 +14,23 @@ export function HomeFeed({ initialPage, searchQuery }: { initialPage: FeedPage; 
   const sentinelRef = useRef<HTMLDivElement | null>(null);
   const searchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
+  const doSearch = useCallback(async (q: string) => {
+    setSearchLoading(true);
+    try {
+      const response = await fetch(`/api/posts?q=${encodeURIComponent(q)}`);
+      if (!response.ok) return;
+      const data = (await response.json()) as { items: PostRecord[] };
+      setSearchResults(data.items);
+    } catch (error) {
+      console.error('[home-feed] 搜索失败', error);
+    } finally {
+      setSearchLoading(false);
+    }
+  }, []);
+
   // 搜索模式：防抖 300ms 后请求搜索接口
   useEffect(() => {
     if (!searchQuery.trim()) {
-      setSearchResults(null);
       return;
     }
 
@@ -34,54 +47,9 @@ export function HomeFeed({ initialPage, searchQuery }: { initialPage: FeedPage; 
         clearTimeout(searchTimerRef.current);
       }
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [searchQuery]);
+  }, [searchQuery, doSearch]);
 
-  async function doSearch(q: string) {
-    setSearchLoading(true);
-    try {
-      const response = await fetch(`/api/posts?q=${encodeURIComponent(q)}`);
-      if (!response.ok) return;
-      const data = (await response.json()) as { items: PostRecord[] };
-      setSearchResults(data.items);
-    } catch (error) {
-      console.error('[home-feed] 搜索失败', error);
-    } finally {
-      setSearchLoading(false);
-    }
-  }
-
-  // 无限滚动（仅在非搜索模式）
-  useEffect(() => {
-    if (searchQuery.trim()) return;
-
-    const target = sentinelRef.current;
-    if (!target || !cursor) {
-      return;
-    }
-
-    let cancelled = false;
-    const controller = new AbortController();
-
-    const observer = new IntersectionObserver(
-      (entries) => {
-        if (entries[0]?.isIntersecting && !loading) {
-          void loadMore(controller.signal);
-        }
-      },
-      { rootMargin: '480px' }
-    );
-
-    observer.observe(target);
-    return () => {
-      cancelled = true;
-      controller.abort();
-      observer.disconnect();
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [cursor, loading, searchQuery]);
-
-  async function loadMore(signal?: AbortSignal) {
+  const loadMore = useCallback(async (signal?: AbortSignal) => {
     if (!cursor || loading) {
       return;
     }
@@ -102,7 +70,34 @@ export function HomeFeed({ initialPage, searchQuery }: { initialPage: FeedPage; 
     } finally {
       setLoading(false);
     }
-  }
+  }, [cursor, loading]);
+
+  // 无限滚动（仅在非搜索模式）
+  useEffect(() => {
+    if (searchQuery.trim()) return;
+
+    const target = sentinelRef.current;
+    if (!target || !cursor) {
+      return;
+    }
+
+    const controller = new AbortController();
+
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries[0]?.isIntersecting && !loading) {
+          void loadMore(controller.signal);
+        }
+      },
+      { rootMargin: '480px' }
+    );
+
+    observer.observe(target);
+    return () => {
+      controller.abort();
+      observer.disconnect();
+    };
+  }, [cursor, loading, searchQuery, loadMore]);
 
   // 搜索模式显示结果
   if (searchQuery.trim()) {
