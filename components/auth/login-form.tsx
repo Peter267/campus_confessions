@@ -10,6 +10,7 @@ import { Captcha, type CaptchaResult } from './captcha';
 interface LoginResponse {
   user?: { id: string; display_name: string; role: string };
   error?: string;
+  detail?: string;
   details?: { fieldErrors?: Record<string, string[]> };
 }
 
@@ -104,7 +105,8 @@ export function LoginForm() {
       });
       const data = (await res.json()) as LoginResponse;
       if (!res.ok) {
-        setError(data.error ?? '登录失败');
+        const detail = data.detail ? `（${data.detail}）` : '';
+        setError((data.error ?? '登录失败') + detail);
         if (data.details?.fieldErrors) setFieldErrors(data.details.fieldErrors);
         setBusy(false);
         return;

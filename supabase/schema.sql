@@ -145,7 +145,7 @@ alter table posts add column if not exists is_anonymous boolean not null default
 create table if not exists sessions (
   id text primary key,
   user_id uuid not null references users(id) on delete cascade,
-  token_hash text not null,
+  token_hash text not null default '',
   user_agent text,
   ip text,
   expires_at timestamptz not null,
@@ -161,6 +161,7 @@ create table if not exists verification_codes (
   identifier text not null,
   purpose text not null check (purpose in ('email_verify', 'email_magic', 'reset_password', 'login_magic')),
   code_hash text not null,
+  token_hash text not null default '',
   payload jsonb,
   attempts int not null default 0,
   consumed_at timestamptz,
@@ -175,7 +176,7 @@ create index if not exists verification_codes_expires_at_idx on verification_cod
 create table if not exists password_resets (
   id uuid primary key default gen_random_uuid(),
   user_id uuid not null references users(id) on delete cascade,
-  token_hash text not null,
+  token_hash text not null default '',
   expires_at timestamptz not null,
   used_at timestamptz,
   created_at timestamptz not null default now()

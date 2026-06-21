@@ -18,7 +18,8 @@ import { verifyCaptcha } from '@/lib/captcha';
 export const dynamic = 'force-dynamic';
 
 export async function POST(request: NextRequest) {
-  const body = await request.json().catch(() => ({}));
+  try {
+    const body = await request.json().catch(() => ({}));
   const parsed = registerSchema.safeParse(body);
   if (!parsed.success) {
     return NextResponse.json({ error: '表单校验失败', details: parsed.error.flatten() }, { status: 400 });
@@ -74,16 +75,23 @@ export async function POST(request: NextRequest) {
 
   const secure = process.env.NODE_ENV === 'production';
   const res = NextResponse.json({
-    user: stripSecrets(user),
-    emailVerification: {
-      sent: mail.ok,
-      transport: mail.transport,
-      previewUrl: mail.previewUrl,
-      previewToken: mail.previewToken
-    }
-  });
-  res.headers.append('Set-Cookie', buildSessionCookie(signSessionToken(sessionId), { secure }));
-  return res;
+      user: stripSecrets(user),
+      emailVerification: {
+        sent: mail.ok,
+        transport: mail.transport,
+        previewUrl: mail.previewUrl,
+        previewToken: mail.previewToken
+      }
+    });
+    res.headers.append('Set-Cookie', buildSessionCookie(signSessionToken(sessionId), { secure }));
+    return res;
+  } catch (err) {
+    console.error('register error', err);
+    return NextResponse.json(
+      { error: '注册服务异常，请稍后重试', detail: err instanceof Error ? err.message : String(err) },
+      { status: 500 }
+    );
+  }
 }
 
 function stripSecrets<T extends { password_hash: string; password_algo: string }>(user: T) {
