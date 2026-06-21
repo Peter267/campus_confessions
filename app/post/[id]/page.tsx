@@ -31,7 +31,6 @@ export default async function PostDetailPage({ params }: { params: Promise<{ id:
         <SectionHeading
           eyebrow="帖子详情"
           title="单条校园墙"
-          description="原图、正文、留言一屏看完，整体像刷动态一样顺滑。"
         />
         <div className="mt-8">
           <DetailClient post={post} comments={comments} />
