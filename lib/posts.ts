@@ -2,12 +2,15 @@ import { sql } from '@/lib/db';
 import { demoComments, demoModerationSettings, demoPosts } from '@/lib/demo-data';
 import { AnnouncementRecord, AuditLogRecord, CategoryRecord, CommentRecord, FeedPage, ModerationSettingsRecord, PostRecord, PostStatus, ReportRecord } from '@/lib/types';
 
-async function fetchPosts(query: TemplateStringsArray, ...values: unknown[]) {
+async function fetchPosts(strings: TemplateStringsArray, ...values: unknown[]) {
   if (!sql) {
     return [] as PostRecord[];
   }
 
-  return (await sql(query as unknown as string, values)) as PostRecord[];
+  // 必须用 spread 透传参数：sql(strings, ...values) 等价于 sql`...${value}`
+  // 如果传 sql(strings, values) 则 Neon 会把整个 values 数组当作单个 $1 参数，
+  // 导致 PostgreSQL 类型不匹配（例如 $1 = [13] 而非 $1 = 13）。
+  return (await sql(strings, ...values)) as PostRecord[];
 }
 
 export async function listPublishedPosts(limit = 12, cursor?: string): Promise<FeedPage> {
