@@ -1,4 +1,5 @@
 create extension if not exists pgcrypto;
+create extension if not exists citext;
 
 create table if not exists posts (
   id uuid primary key default gen_random_uuid(),
@@ -99,3 +100,135 @@ create table if not exists audit_logs (
   reason text,
   created_at timestamptz not null default now()
 );
+
+-- =========================================================================
+-- Account system
+-- =========================================================================
+
+-- Roles: 'user' / 'moderator' / 'admin' / 'superadmin'
+-- Status: 'active' / 'suspended' / 'closed'
+create table if not exists users (
+  id uuid primary key default gen_random_uuid(),
+  username citext unique,
+  email citext unique,
+  email_verified_at timestamptz,
+  password_hash text not null,
+  password_algo text not null default 'scrypt-sha256',
+  display_name text not null,
+  avatar_url text,
+  bio text,
+  role text not null default 'user' check (role in ('user', 'moderator', 'admin', 'superadmin')),
+  status text not null default 'active' check (status in ('active', 'suspended', 'closed')),
+  oauth_provider text,
+  oauth_subject text,
+  last_login_at timestamptz,
+  last_login_ip text,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  constraint users_username_format check (username is null or username ~ '^[a-z0-9_]{3,24}$'),
+  constraint users_email_format check (email is null or email ~* '^[^@\s]+@[^@\s]+\.[^@\s]+$'),
+  constraint users_display_name_len check (char_length(display_name) between 2 and 24),
+  constraint users_oauth_unique unique (oauth_provider, oauth_subject)
+);
+
+create unique index if not exists users_username_lower_idx on users (lower(username));
+create unique index if not exists users_email_lower_idx on users (lower(email));
+create unique index if not exists users_display_name_idx on users (display_name);
+create index if not exists users_role_idx on users (role);
+
+-- 帖子作者昵称与已注册昵称保持一致，可同时承担"匿名代号防抢注"职责
+alter table posts add column if not exists user_id uuid references users(id) on delete set null;
+alter table posts add column if not exists is_anonymous boolean not null default true;
+
+-- Sessions: id is a random 32-byte hex token (also the cookie value).
+-- The hashed form is stored in token_hash for fast lookup / 撤销。
+create table if not exists sessions (
+  id text primary key,
+  user_id uuid not null references users(id) on delete cascade,
+  token_hash text not null,
+  user_agent text,
+  ip text,
+  expires_at timestamptz not null,
+  created_at timestamptz not null default now()
+);
+
+create index if not exists sessions_user_id_idx on sessions (user_id);
+create index if not exists sessions_expires_at_idx on sessions (expires_at);
+
+-- Verification codes: email magic link / future SMS, single table for both
+create table if not exists verification_codes (
+  id uuid primary key default gen_random_uuid(),
+  identifier text not null,
+  purpose text not null check (purpose in ('email_verify', 'email_magic', 'reset_password', 'login_magic')),
+  code_hash text not null,
+  payload jsonb,
+  attempts int not null default 0,
+  consumed_at timestamptz,
+  expires_at timestamptz not null,
+  created_at timestamptz not null default now()
+);
+
+create index if not exists verification_codes_identifier_idx on verification_codes (identifier, purpose);
+create index if not exists verification_codes_expires_at_idx on verification_codes (expires_at);
+
+-- Password reset tokens: dedicated long-lived token separate from codes
+create table if not exists password_resets (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid not null references users(id) on delete cascade,
+  token_hash text not null,
+  expires_at timestamptz not null,
+  used_at timestamptz,
+  created_at timestamptz not null default now()
+);
+
+create index if not exists password_resets_user_id_idx on password_resets (user_id);
+create index if not exists password_resets_expires_at_idx on password_resets (expires_at);
+
+-- Rate limit: counter window for sensitive endpoints
+create table if not exists rate_limit_events (
+  id uuid primary key default gen_random_uuid(),
+  bucket text not null,
+  identifier text not null,
+  created_at timestamptz not null default now()
+);
+
+create index if not exists rate_limit_events_bucket_idx on rate_limit_events (bucket, identifier, created_at desc);
+
+-- =========================================================================
+-- 站点级配置（SMTP / OAuth 第三方登录）
+--   - key 形如 'smtp'、'oauth.github'、'oauth.google' 等
+--   - 非敏感字段以 jsonb 明文存
+--   - 敏感字段（password、client_secret、refresh_token）以
+--     pgcrypto 的 pgp_sym_encrypt 加密后再写入 encrypted_payload (bytea)
+--   - 修改后写入 site_settings_audit 审计表（旧/新值对比）
+-- =========================================================================
+create table if not exists site_settings (
+  key text primary key,
+  -- 非敏感字段，例如 host / port / username / from / client_id / redirect_uri / scope / enabled
+  public_payload jsonb not null default '{}'::jsonb,
+  -- 敏感字段（smtp.password / oauth.client_secret 等），整体用 SITE_SETTINGS_SECRET 加密
+  encrypted_payload bytea,
+  -- 加密时使用的密钥版本，便于未来轮换
+  secret_version integer not null default 1,
+  updated_at timestamptz not null default now(),
+  updated_by text
+);
+
+create index if not exists site_settings_updated_at_idx on site_settings (updated_at desc);
+
+create table if not exists site_settings_audit (
+  id uuid primary key default gen_random_uuid(),
+  key text not null,
+  action text not null check (action in ('create', 'update', 'delete', 'test')),
+  actor text not null,
+  -- 变更前后的非敏感字段对比，敏感字段始终置 null
+  before_payload jsonb,
+  after_payload jsonb,
+  -- 测试结果（test_smtp / test_oauth）也写到这里
+  test_result jsonb,
+  ip text,
+  user_agent text,
+  created_at timestamptz not null default now()
+);
+
+create index if not exists site_settings_audit_key_idx on site_settings_audit (key, created_at desc);

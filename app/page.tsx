@@ -2,7 +2,9 @@ import Link from 'next/link';
 import { HomeSection } from '@/components/home-section';
 import { AnnouncementSidebar } from '@/components/announcement-sidebar';
 import { CategoryNav } from '@/components/category-nav';
+import { UserMenu } from '@/components/auth/user-menu';
 import { listPublishedPosts, getAnnouncement, listCategories } from '@/lib/posts';
+import { getCurrentUser } from '@/lib/auth';
 
 export const dynamic = 'force-dynamic';
 export const revalidate = 0;
@@ -17,6 +19,7 @@ export default async function HomePage({
   const initialPage = await listPublishedPosts(12, undefined, category);
   const announcement = await getAnnouncement();
   const categories = await listCategories();
+  const user = await getCurrentUser();
 
   return (
     <main className="mx-auto flex w-full max-w-[1440px] flex-col gap-0 px-0 sm:px-4 lg:px-6">
@@ -33,6 +36,7 @@ export default async function HomePage({
           <Link href="/publish" className="rounded-full bg-white/90 px-3 py-1.5 text-xs font-semibold text-slate-900 transition hover:bg-white sm:px-4 sm:py-2 sm:text-sm">
             发布
           </Link>
+          <UserMenu initialUser={user} />
           <Link href="/admin" className="rounded-full border border-white/12 bg-white/5 px-3 py-1.5 text-xs text-slate-200 transition hover:bg-white/10 sm:px-4 sm:py-2 sm:text-sm">
             管理
           </Link>

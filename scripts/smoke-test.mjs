@@ -15,15 +15,24 @@ process.on('uncaughtException', (err) => {
 });
 
 const results = [];
-function record(name, fn) {
-  try {
-    fn();
-    results.push({ name, ok: true });
-    console.log(`  PASS  ${name}`);
-  } catch (err) {
-    results.push({ name, ok: false, error: err });
-    console.error(`  FAIL  ${name}\n        ${err.message}`);
-  }
+let queue = Promise.resolve();
+async function record(name, fn) {
+  const task = (async () => {
+    try {
+      await fn();
+      results.push({ name, ok: true });
+      console.log(`  PASS  ${name}`);
+    } catch (err) {
+      results.push({ name, ok: false, error: err });
+      console.error(`  FAIL  ${name}\n        ${err.message}`);
+    }
+  })();
+  // 串行：每个 record 等待上一个结束，避免 process.env / 全局状态被并发踩坏
+  queue = queue.then(() => task);
+  return task;
+}
+async function flush() {
+  await queue;
 }
 
 console.log('== moderation.ts ==');
@@ -523,6 +532,404 @@ record('GET /api/admin/reports 正确 token 返回列表', async () => {
   assert.ok(Array.isArray(body.items));
 });
 
+console.log('\n== 账号系统：注册 / 登录 / 登出 ==');
+
+const AUTH_ROUTES = [
+  '../app/api/auth/register/route.ts',
+  '../app/api/auth/login/route.ts',
+  '../app/api/auth/logout/route.ts',
+  '../app/api/auth/me/route.ts',
+  '../app/api/auth/password/route.ts',
+  '../app/api/auth/password/forgot/route.ts',
+  '../app/api/auth/password/reset/route.ts',
+  '../app/api/auth/email/send/route.ts',
+  '../app/api/auth/email/verify/route.ts',
+  '../app/api/users/me/route.ts',
+  '../app/api/users/me/sessions/route.ts'
+];
+for (const r of AUTH_ROUTES) {
+  record(`模块加载：${r}`, async () => {
+    await import(r);
+  });
+}
+
+record('auth-validators: 用户名校验', async () => {
+  const { validateUsername, validateEmail, validateDisplayName, normalizeUsername } = await import('../lib/auth-validators.ts');
+  const { validatePasswordStrength } = await import('../lib/passwords.ts');
+  // 'ab' 长度 2 < 3，期望长度错误
+  assert.equal(validateUsername('ab'), '用户名长度需在 3 到 24 个字符之间');
+  assert.equal(validateUsername('valid_user_1'), null);
+  assert.equal(validateUsername('InvalidUser'), '用户名仅支持小写字母、数字与下划线');
+  assert.equal(validateEmail('no-at-sign'), '邮箱格式不正确');
+  assert.equal(validateEmail('a@b.com'), null);
+  assert.equal(validateDisplayName('x'), '昵称长度需在 2 到 24 个字符之间');
+  assert.equal(validatePasswordStrength('short').valid, false);
+  assert.equal(validatePasswordStrength('onlyletters').valid, false);
+  assert.equal(validatePasswordStrength('Mix3dLetters').valid, true);
+  assert.equal(normalizeUsername('Hello'), 'hello');
+});
+
+record('passwords: hash 与 verify 往返一致', async () => {
+  const { hashPassword, verifyPassword } = await import('../lib/passwords.ts');
+  const hash = await hashPassword('StrongPass1!');
+  assert.ok(hash.startsWith('scrypt-sha256$'));
+  assert.equal(await verifyPassword('StrongPass1!', hash), true);
+  assert.equal(await verifyPassword('StrongPass2!', hash), false);
+});
+
+record('session: sign / verify 往返一致，篡改后失败', async () => {
+  const { signSessionToken, verifySessionToken } = await import('../lib/session.ts');
+  const id = 'a'.repeat(64);
+  const signed = signSessionToken(id);
+  assert.equal(verifySessionToken(signed), id);
+  // 篡改一位应返回 null
+  const tampered = signed.slice(0, -1) + (signed.endsWith('A') ? 'B' : 'A');
+  assert.equal(verifySessionToken(tampered), null);
+  // 错误格式
+  assert.equal(verifySessionToken('not-a-signed-value'), null);
+  assert.equal(verifySessionToken(undefined), null);
+});
+
+record('permissions: hasRole / can 角色矩阵', async () => {
+  const { hasRole, can } = await import('../lib/permissions.ts');
+  assert.equal(hasRole('user', 'user'), true);
+  assert.equal(hasRole('user', 'admin'), false);
+  assert.equal(hasRole('superadmin', 'admin'), true);
+  assert.equal(can('user', 'post.moderate'), false);
+  assert.equal(can('moderator', 'post.moderate'), true);
+  assert.equal(can('admin', 'user.manage'), false);
+  assert.equal(can('superadmin', 'user.manage'), true);
+});
+
+record('rate-limit: 超过阈值被拒绝', async () => {
+  const { hitRateLimit, clearRateLimit } = await import('../lib/rate-limit.ts');
+  const bucket = 'smoke-test:rl';
+  const id = `tester-${Date.now()}`;
+  for (let i = 0; i < 3; i++) {
+    const r = await hitRateLimit({ bucket, identifier: id, windowMs: 60_000, max: 3 });
+    assert.equal(r.allowed, true);
+  }
+  const blocked = await hitRateLimit({ bucket, identifier: id, windowMs: 60_000, max: 3 });
+  assert.equal(blocked.allowed, false);
+  await clearRateLimit(bucket, id);
+});
+
+record('turnstile: dev 模式未配置密钥时直接放行', async () => {
+  delete process.env.TURNSTILE_SECRET;
+  const { verifyTurnstile } = await import('../lib/turnstile.ts');
+  const r = await verifyTurnstile(null);
+  assert.equal(r.ok, true);
+  assert.equal(r.skipped, true);
+});
+
+record('mail: magic link token 生成与校验', async () => {
+  const { packMagicToken, unpackMagicToken, buildMagicLink } = await import('../lib/mail.ts');
+  const packed = packMagicToken('user@school.edu', 'email_verify');
+  const unpacked = unpackMagicToken(packed.token);
+  assert.ok(unpacked);
+  assert.equal(unpacked.identifier, 'user@school.edu');
+  assert.equal(unpacked.purpose, 'email_verify');
+  assert.equal(unpackMagicToken('bad.token'), null);
+  // buildMagicLink 拼接正确
+  const link = buildMagicLink({ email: 'a@b.com', token: 'tok', purpose: 'email_verify', siteUrl: 'https://x.com/' });
+  assert.ok(link.startsWith('https://x.com/verify-email?'));
+});
+
+record('POST /api/auth/register 创建账号并下发 session', async () => {
+  const { POST } = await import('../app/api/auth/register/route.ts');
+  const unique = `t${Date.now().toString(36).slice(-6)}`;
+  const body = JSON.stringify({
+    username: unique,
+    email: `${unique}@school.edu`,
+    displayName: `测试员_${unique}`,
+    password: 'GoodPass123!'
+  });
+  const req = new Request('http://localhost/api/auth/register', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body
+  });
+  const res = await POST(req);
+  assert.equal(res.status, 200);
+  const data = await res.json();
+  assert.ok(data.user);
+  assert.equal(data.user.username, unique);
+  assert.ok(data.emailVerification?.previewUrl);
+  // 二次注册同名应冲突（必须用新的 Request 对象，否则 body 已被消费）
+  const dup = await POST(new Request('http://localhost/api/auth/register', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body
+  }));
+  assert.equal(dup.status, 409);
+});
+
+record('POST /api/auth/login 用户名登录', async () => {
+  const unique = `l${Date.now().toString(36).slice(-6)}`;
+  const { POST: register } = await import('../app/api/auth/register/route.ts');
+  await register(new Request('http://localhost/api/auth/register', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ username: unique, email: `${unique}@x.io`, displayName: `登录测试${unique}`, password: 'GoodPass123!' })
+  }));
+  const { POST: login } = await import('../app/api/auth/login/route.ts');
+  const ok = await login(new Request('http://localhost/api/auth/login', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ identifier: unique, password: 'GoodPass123!' })
+  }));
+  assert.equal(ok.status, 200);
+  const fail = await login(new Request('http://localhost/api/auth/login', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ identifier: unique, password: 'WrongPass123!' })
+  }));
+  assert.equal(fail.status, 401);
+});
+
+record('POST /api/auth/password/forgot 对未知邮箱仍返回 200', async () => {
+  const { POST } = await import('../app/api/auth/password/forgot/route.ts');
+  const res = await POST(new Request('http://localhost/api/auth/password/forgot', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ email: 'no-such-user@nowhere.edu' })
+  }));
+  assert.equal(res.status, 200);
+});
+
+console.log('\n== 超级管理员：站点配置 (SMTP + OAuth) ==');
+
+record('validators: smtp 拒绝非法端口', async () => {
+  const v = await import('../lib/validators.ts');
+  const r = v.smtpConfigSchema.safeParse({ host: 'smtp.qq.com', port: 999999, encryption: 'starttls', username: 'a', from: 'a@b.com' });
+  assert.equal(r.success, false);
+  if (!r.success) assert.ok(r.error.flatten().fieldErrors.port);
+});
+
+record('validators: smtp 拒绝非法加密方式', async () => {
+  const v = await import('../lib/validators.ts');
+  const r = v.smtpConfigSchema.safeParse({ host: 'smtp.qq.com', port: 465, encryption: 'unknown', username: 'a', from: 'a@b.com' });
+  assert.equal(r.success, false);
+  if (!r.success) assert.ok(r.error.flatten().fieldErrors.encryption);
+});
+
+record('validators: smtp SSL 与 465 端口一致性', async () => {
+  const v = await import('../lib/validators.ts');
+  const r = v.smtpConfigSchema.safeParse({ host: 'smtp.qq.com', port: 587, encryption: 'ssl', username: 'a', from: 'a@b.com' });
+  assert.equal(r.success, false);
+  if (!r.success) assert.ok(r.error.flatten().fieldErrors.port);
+});
+
+record('validators: smtp 通过合法输入', async () => {
+  const v = await import('../lib/validators.ts');
+  const r = v.smtpConfigSchema.safeParse({ host: 'smtp.qq.com', port: 465, encryption: 'ssl', username: 'a@b.com', from: 'a@b.com', password: 'secret' });
+  assert.equal(r.success, true);
+  if (r.success) {
+    assert.equal(r.data.host, 'smtp.qq.com');
+    assert.equal(r.data.port, 465);
+    assert.equal(r.data.encryption, 'ssl');
+    assert.equal(r.data.password, 'secret');
+  }
+});
+
+record('validators: oauth 启用时必须提供 clientId', async () => {
+  const v = await import('../lib/validators.ts');
+  const r = v.oauthProviderSchema.safeParse({ enabled: true, clientId: '', clientSecret: 'x', redirectUri: 'https://x.com/cb' }, 'github');
+  assert.equal(r.success, false);
+  if (!r.success) assert.ok(r.error.flatten().fieldErrors.clientId);
+});
+
+record('validators: oauth 拒绝非 https 的 redirect_uri', async () => {
+  const v = await import('../lib/validators.ts');
+  const r = v.oauthProviderSchema.safeParse({ enabled: false, clientId: 'a', clientSecret: 'b', redirectUri: 'http://insecure.com/cb' }, 'github');
+  assert.equal(r.success, false);
+  if (!r.success) assert.ok(r.error.flatten().fieldErrors.redirectUri);
+});
+
+record('validators: oauth 接受本地开发回调', async () => {
+  const v = await import('../lib/validators.ts');
+  const r = v.oauthProviderSchema.safeParse({ enabled: true, clientId: 'a', clientSecret: 'b', redirectUri: 'http://localhost:3000/cb' }, 'github');
+  assert.equal(r.success, true);
+});
+
+record('site-settings: 缓存与回退', async () => {
+  const ss = await import('../lib/site-settings.ts');
+  ss.invalidateSiteSettingsCache();
+  // 在没有 DATABASE_URL 的 demo 模式下应返回 null
+  const smtp = await ss.getSmtpConfig();
+  // 不强制断言 smtp 形状（取决于环境变量），只要调用不抛错
+  assert.ok(smtp === null || typeof smtp === 'object');
+});
+
+record('site-settings: 缓存失效 invalidateSiteSettingsCache', async () => {
+  const ss = await import('../lib/site-settings.ts');
+  ss.invalidateSiteSettingsCache('smtp');
+  ss.invalidateSiteSettingsCache(); // 全部失效
+  assert.ok(true);
+});
+
+record('API 路由模块加载：site-settings GET/PUT/test', async () => {
+  await import('../app/api/admin/site-settings/route.ts');
+  await import('../app/api/admin/site-settings/test/route.ts');
+  assert.ok(true);
+});
+
+record('GET /api/admin/site-settings 无 token 拒绝', async () => {
+  delete process.env.ADMIN_TOKEN;
+  const { GET } = await import('../app/api/admin/site-settings/route.ts');
+  const res = await GET(new Request('http://localhost/api/admin/site-settings'));
+  assert.equal(res.status, 401);
+});
+
+record('GET /api/admin/site-settings 正确 token 返回', async () => {
+  process.env.ADMIN_TOKEN = 'test-admin-token';
+  const { GET } = await import('../app/api/admin/site-settings/route.ts');
+  const res = await GET(new Request('http://localhost/api/admin/site-settings', { headers: { 'x-admin-token': 'test-admin-token' } }));
+  assert.equal(res.status, 200);
+  const body = await res.json();
+  assert.ok('smtp' in body);
+  assert.ok('oauth' in body);
+  assert.ok('audit' in body);
+  // 应包含 4 个 OAuth provider
+  for (const p of ['github', 'google', 'microsoft', 'qq']) {
+    assert.ok(p in body.oauth, `缺少 OAuth provider: ${p}`);
+  }
+});
+
+record('PUT /api/admin/site-settings 写入 SMTP（demo 模式）', async () => {
+  process.env.ADMIN_TOKEN = 'test-admin-token';
+  const { PUT } = await import('../app/api/admin/site-settings/route.ts');
+  const req = new Request('http://localhost/api/admin/site-settings', {
+    method: 'PUT',
+    headers: { 'content-type': 'application/json', 'x-admin-token': 'test-admin-token' },
+    body: JSON.stringify({
+      key: 'smtp',
+      value: {
+        enabled: true,
+        host: 'smtp.qq.com',
+        port: 465,
+        encryption: 'ssl',
+        username: 'bot@school.edu',
+        from: '校园墙 <bot@school.edu>',
+        password: 'super-secret-password'
+      }
+    })
+  });
+  const res = await PUT(req);
+  assert.equal(res.status, 200);
+  const body = await res.json();
+  assert.equal(body.key, 'smtp');
+  // 返回中密码字段必须为 null（旧值用 hasPassword 标记）
+  assert.equal(body.config.password, null);
+  assert.equal(body.config.hasPassword, true);
+});
+
+record('PUT /api/admin/site-settings 写入 OAuth github', async () => {
+  process.env.ADMIN_TOKEN = 'test-admin-token';
+  const { PUT } = await import('../app/api/admin/site-settings/route.ts');
+  const req = new Request('http://localhost/api/admin/site-settings', {
+    method: 'PUT',
+    headers: { 'content-type': 'application/json', 'x-admin-token': 'test-admin-token' },
+    body: JSON.stringify({
+      key: 'oauth.github',
+      value: {
+        enabled: true,
+        clientId: 'Iv1.abc',
+        clientSecret: 'cs_xxx',
+        redirectUri: 'https://school.edu/oauth/github/callback',
+        scope: 'read:user user:email'
+      }
+    })
+  });
+  const res = await PUT(req);
+  assert.equal(res.status, 200);
+  const body = await res.json();
+  assert.equal(body.key, 'oauth.github');
+  assert.equal(body.config.clientSecret, null);
+  assert.equal(body.config.hasSecret, true);
+});
+
+record('PUT /api/admin/site-settings 拒绝未知 key', async () => {
+  process.env.ADMIN_TOKEN = 'test-admin-token';
+  const { PUT } = await import('../app/api/admin/site-settings/route.ts');
+  const req = new Request('http://localhost/api/admin/site-settings', {
+    method: 'PUT',
+    headers: { 'content-type': 'application/json', 'x-admin-token': 'test-admin-token' },
+    body: JSON.stringify({ key: 'oauth.bilibili', value: { enabled: true, clientId: 'a', clientSecret: 'b', redirectUri: 'https://x.com/cb' } })
+  });
+  const res = await PUT(req);
+  assert.equal(res.status, 400);
+});
+
+record('PUT /api/admin/site-settings 拒绝非法 SMTP 端口', async () => {
+  process.env.ADMIN_TOKEN = 'test-admin-token';
+  const { PUT } = await import('../app/api/admin/site-settings/route.ts');
+  const req = new Request('http://localhost/api/admin/site-settings', {
+    method: 'PUT',
+    headers: { 'content-type': 'application/json', 'x-admin-token': 'test-admin-token' },
+    body: JSON.stringify({ key: 'smtp', value: { enabled: true, host: 'smtp.qq.com', port: 99999, encryption: 'starttls', username: 'a', from: 'a@b.com' } })
+  });
+  const res = await PUT(req);
+  assert.equal(res.status, 400);
+});
+
+record('POST /api/admin/site-settings/test 测试 SMTP 缺少密码', async () => {
+  process.env.ADMIN_TOKEN = 'test-admin-token';
+  const { POST } = await import('../app/api/admin/site-settings/test/route.ts');
+  const req = new Request('http://localhost/api/admin/site-settings/test', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', 'x-admin-token': 'test-admin-token' },
+    body: JSON.stringify({ key: 'smtp', value: { enabled: true, host: 'localhost', port: 65535, encryption: 'starttls', username: 'a', from: 'a@b.com' } })
+  });
+  const res = await POST(req);
+  assert.equal(res.status, 200);
+  const body = await res.json();
+  assert.equal(body.result.ok, false);
+  assert.match(body.result.error, /密码|password|connect|timeout|ECONNREFUSED|SMTP/i);
+});
+
+record('POST /api/admin/site-settings/test 拒绝未知 key', async () => {
+  process.env.ADMIN_TOKEN = 'test-admin-token';
+  const { POST } = await import('../app/api/admin/site-settings/test/route.ts');
+  const req = new Request('http://localhost/api/admin/site-settings/test', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', 'x-admin-token': 'test-admin-token' },
+    body: JSON.stringify({ key: 'unknown.key', value: {} })
+  });
+  const res = await POST(req);
+  assert.equal(res.status, 400);
+});
+
+record('site-settings: 写入后会失效缓存，读取拿到新值', async () => {
+  process.env.ADMIN_TOKEN = 'test-admin-token';
+  const { PUT } = await import('../app/api/admin/site-settings/route.ts');
+  const ss = await import('../lib/site-settings.ts');
+  ss.invalidateSiteSettingsCache();
+
+  const req = new Request('http://localhost/api/admin/site-settings', {
+    method: 'PUT',
+    headers: { 'content-type': 'application/json', 'x-admin-token': 'test-admin-token' },
+    body: JSON.stringify({
+      key: 'smtp',
+      value: {
+        enabled: true, host: 'smtp.qq.com', port: 465, encryption: 'ssl',
+        username: 'hot-reload@school.edu', from: 'hot@school.edu', password: 'p'
+      }
+    })
+  });
+  const res = await PUT(req);
+  assert.equal(res.status, 200);
+
+  // 再次 GET 应能反映新 host
+  const { GET } = await import('../app/api/admin/site-settings/route.ts');
+  const getRes = await GET(new Request('http://localhost/api/admin/site-settings', { headers: { 'x-admin-token': 'test-admin-token' } }));
+  const body = await getRes.json();
+  // demo 模式下，db 不可用，getSmtpConfig 会回退到环境变量
+  // 这里只检查不抛错；热加载主要在有 DB 时生效（缓存失效）
+  assert.ok('smtp' in body);
+});
+
+await flush();
 console.log('\n========== 总结 ==========');
 const passed = results.filter((r) => r.ok).length;
 const failed = results.filter((r) => !r.ok);

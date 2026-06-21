@@ -3,6 +3,9 @@
 import { useEffect, useState } from 'react';
 import type { AnnouncementRecord, AuditLogRecord, CategoryRecord, ModerationSettingsRecord, PostRecord } from '@/lib/types';
 import type { ReportWithPost } from '@/lib/posts';
+import { SiteSettingsPanel } from '@/components/admin-site-settings';
+import { CaptchaSettingsPanel } from '@/components/admin-captcha-settings';
+import { UsersPanel } from '@/components/admin-users-panel';
 
 const TOKEN_STORAGE_KEY = 'campus:admin-token';
 
@@ -18,7 +21,7 @@ function authHeaders(token: string): HeadersInit {
   return { 'Content-Type': 'application/json', 'x-admin-token': token };
 }
 
-type Tab = 'pending' | 'published' | 'categories' | 'announcement' | 'rules' | 'logs' | 'reports';
+type Tab = 'pending' | 'published' | 'categories' | 'announcement' | 'rules' | 'logs' | 'reports' | 'site-config' | 'users';
 
 export function AdminDashboard({
   pendingPosts,
@@ -396,9 +399,11 @@ export function AdminDashboard({
     { key: 'pending', label: '待审核' },
     { key: 'published', label: '已发布' },
     { key: 'reports', label: `举报${reports.length > 0 ? ` (${reports.length})` : ''}` },
+    { key: 'users', label: '用户管理' },
     { key: 'categories', label: '分类管理' },
     { key: 'announcement', label: '公告编辑' },
     { key: 'rules', label: '规则面板' },
+    { key: 'site-config', label: '站点配置' },
     { key: 'logs', label: '操作日志' },
   ];
 
@@ -625,6 +630,25 @@ export function AdminDashboard({
             ))}
             {logs.length === 0 ? <p className="text-sm text-slate-400">暂无操作记录。</p> : null}
           </div>
+        </div>
+      )}
+
+      {/* ============ SITE CONFIG TAB ============ */}
+      {tab === 'site-config' && (
+        <div className="space-y-6">
+          <div className="rounded-[28px] border border-white/10 bg-white/6 p-6 backdrop-blur-xl">
+            <SiteSettingsPanel token={token} />
+          </div>
+          <div className="rounded-[28px] border border-white/10 bg-white/6 p-6 backdrop-blur-xl">
+            <CaptchaSettingsPanel token={token} />
+          </div>
+        </div>
+      )}
+
+      {/* ============ USERS TAB ============ */}
+      {tab === 'users' && (
+        <div className="rounded-[28px] border border-white/10 bg-white/6 p-6 backdrop-blur-xl">
+          <UsersPanel token={token} />
         </div>
       )}
 

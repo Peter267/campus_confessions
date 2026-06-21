@@ -157,6 +157,8 @@ export async function createPost(input: {
   moderationReason?: string | null;
   ipAddress?: string | null;
   tags?: string[];
+  userId?: string | null;
+  isAnonymous?: boolean;
 }) {
   if (!sql) {
     const createdAt = new Date().toISOString();
@@ -175,7 +177,9 @@ export async function createPost(input: {
       created_at: createdAt,
       published_at: input.status === 'published' ? createdAt : null,
       ip_address: input.ipAddress ?? null,
-      tags: input.tags ?? []
+      tags: input.tags ?? [],
+      user_id: input.userId ?? null,
+      is_anonymous: input.isAnonymous ?? true
     };
 
     demoPosts.unshift(record);
@@ -183,7 +187,7 @@ export async function createPost(input: {
   }
 
   const rows = (await sql`
-    insert into posts (category, alias, author_name, content, content_html, image_url, status, moderation_reason, published_at, ip_address)
+    insert into posts (category, alias, author_name, content, content_html, image_url, status, moderation_reason, published_at, ip_address, user_id, is_anonymous)
     values (
       ${input.category},
       ${input.alias},
@@ -194,7 +198,9 @@ export async function createPost(input: {
       ${input.status},
       ${input.moderationReason ?? null},
       ${input.status === 'published' ? new Date().toISOString() : null},
-      ${input.ipAddress ?? null}
+      ${input.ipAddress ?? null},
+      ${input.userId ?? null},
+      ${input.isAnonymous ?? true}
     )
     returning *
   `) as PostRecord[];

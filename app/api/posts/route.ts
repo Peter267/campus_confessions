@@ -3,6 +3,8 @@ import { createPost, getModerationSettings, listPublishedPosts, searchPosts } fr
 import { findBlockedKeyword, getBaseModerationSettings, resolveClientIp, sanitizeAlias } from '@/lib/moderation';
 import { publishSchema } from '@/lib/validators';
 import { sanitizeRichText, plainText } from '@/lib/sanitize';
+import { getCurrentUser } from '@/lib/auth';
+import { getUserByUsername } from '@/lib/users';
 
 // 防止首页瀑布流拉到陈旧数据：新审核通过的帖子必须立刻出现在下一次 GET。
 export const dynamic = 'force-dynamic';
@@ -44,6 +46,19 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: '该代号已被封禁' }, { status: 403 });
   }
 
+  // 昵称不得与已注册用户名相同（防止冒充）
+  const conflictUser = await getUserByUsername(alias);
+  if (conflictUser) {
+    return NextResponse.json({ error: '该代号已被注册用户占用，请更换' }, { status: 409 });
+  }
+
+  // 读取当前登录用户（可选）
+  const currentUser = await getCurrentUser();
+  const isAnonymous = Boolean((body as { isAnonymous?: boolean }).isAnonymous) || !currentUser;
+  // 登录用户实名发布时，author_name 使用其 display_name；否则使用 alias
+  const authorName = currentUser && !isAnonymous ? currentUser.display_name : alias;
+  const userId = currentUser && !isAnonymous ? currentUser.id : null;
+
   // 敏感词检测使用纯文本（剥离 HTML 后的内容），避免富文本标签干扰命中。
   const safeHtml = sanitizeRichText(parsed.data.contentHtml || parsed.data.content);
   const plain = plainText(safeHtml) || parsed.data.content;
@@ -53,7 +68,7 @@ export async function POST(request: NextRequest) {
 
   const post = await createPost({
     category: parsed.data.category,
-    alias,
+    alias: authorName,
     content: plain,
     contentHtml: safeHtml,
     imageUrl: parsed.data.imageUrl ?? null,
@@ -61,6 +76,8 @@ export async function POST(request: NextRequest) {
     moderationReason,
     ipAddress: ip,
     tags: (parsed.data as { tags?: string[] }).tags ?? [],
+    userId,
+    isAnonymous
   });
 
   if (status === 'rejected') {

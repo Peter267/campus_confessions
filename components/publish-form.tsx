@@ -9,6 +9,13 @@ const categories: PostCategory[] = ['表白', '万能墙', '失物招领', '日�
 
 type UploadStatus = 'idle' | 'signing' | 'uploading' | 'done' | 'error';
 
+interface CurrentUser {
+  id: string;
+  display_name: string;
+  username: string | null;
+  role: string;
+}
+
 async function uploadToR2(file: File, signal: AbortSignal): Promise<string> {
   const signRes = await fetch('/api/upload/sign', {
     method: 'POST',
@@ -54,6 +61,8 @@ function toPlain(html: string): string {
 
 export function PublishForm() {
   const router = useRouter();
+  const [currentUser, setCurrentUser] = useState<CurrentUser | null>(null);
+  const [anonymous, setAnonymous] = useState(true);
   const [alias, setAlias] = useState('匿名同学');
   const [category, setCategory] = useState<PostCategory>('万能墙');
   const [contentHtml, setContentHtml] = useState('');
@@ -64,6 +73,20 @@ export function PublishForm() {
   const [dragging, setDragging] = useState(false);
   const [uploadStatus, setUploadStatus] = useState<UploadStatus>('idle');
   const uploadAbortRef = useRef<AbortController | null>(null);
+
+  useEffect(() => {
+    // 拉取当前登录用户
+    fetch('/api/auth/me', { cache: 'no-store' })
+      .then((res) => res.json())
+      .then((data: { user?: CurrentUser }) => {
+        if (data.user) {
+          setCurrentUser(data.user);
+          // 登录用户默认非匿名（实名发布），可手动切换为匿名
+          setAnonymous(false);
+        }
+      })
+      .catch(() => undefined);
+  }, []);
 
   useEffect(() => {
     return () => {
@@ -131,11 +154,12 @@ export function PublishForm() {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        alias,
+        alias: anonymous ? alias : (currentUser?.display_name ?? alias),
         category,
         content: plainContent, // 服务端用 plain 做敏感词检查
         contentHtml, // 服务端会 sanitize 后入库
-        imageUrl
+        imageUrl,
+        isAnonymous: anonymous
       })
     });
 
@@ -157,12 +181,20 @@ export function PublishForm() {
       <div className="grid gap-4 md:grid-cols-2">
         <label className="space-y-2">
           <span className="text-sm text-slate-200">小名 / 代号</span>
-          <input
-            value={alias}
-            onChange={(event) => setAlias(event.target.value)}
-            className="w-full rounded-2xl border border-white/10 bg-white/7 px-4 py-3 text-white outline-none ring-0 transition placeholder:text-slate-500 focus:border-cyan-300/50"
-            placeholder="例如：晚自习逃跑者"
-          />
+          {currentUser && !anonymous ? (
+            <input
+              value={currentUser.display_name}
+              disabled
+              className="w-full cursor-not-allowed rounded-2xl border border-white/10 bg-white/3 px-4 py-3 text-slate-400"
+            />
+          ) : (
+            <input
+              value={alias}
+              onChange={(event) => setAlias(event.target.value)}
+              className="w-full rounded-2xl border border-white/10 bg-white/7 px-4 py-3 text-white outline-none ring-0 transition placeholder:text-slate-500 focus:border-cyan-300/50"
+              placeholder="例如：晚自习逃跑者"
+            />
+          )}
         </label>
 
         <label className="space-y-2">
@@ -180,6 +212,25 @@ export function PublishForm() {
           </select>
         </label>
       </div>
+
+      {currentUser ? (
+        <label className="flex items-center gap-3 rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-sm text-slate-200">
+          <input
+            type="checkbox"
+            checked={anonymous}
+            onChange={(event) => setAnonymous(event.target.checked)}
+            className="h-4 w-4"
+          />
+          匿名发布
+          <span className="text-xs text-slate-400">
+            （关闭后将使用你的昵称「{currentUser.display_name}」实名发布）
+          </span>
+        </label>
+      ) : (
+        <p className="rounded-2xl border border-cyan-300/20 bg-cyan-300/5 px-4 py-3 text-xs text-slate-300">
+          访客模式：可直接投稿，<a href="/login" className="text-cyan-200 hover:text-cyan-100">登录</a>后可实名发布并管理自己的内容。
+        </p>
+      )}
 
       <div className="space-y-2">
         <span className="text-sm text-slate-200">投稿内容（支持富文本）</span>
