@@ -171,7 +171,8 @@ export function SiteSettingsPanel({ token }: { token: string }) {
   }
 
   useEffect(() => {
-    void refresh();
+    const timer = setTimeout(() => refresh(), 0);
+    return () => clearTimeout(timer);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [token]);
 

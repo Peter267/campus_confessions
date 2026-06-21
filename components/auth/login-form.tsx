@@ -64,28 +64,31 @@ export function LoginForm() {
   // 从邮件链接跳转过来时，自动用 token 完成魔法链接登录
   useEffect(() => {
     if (!magicToken) return;
-    setMode('magic');
-    setBusy(true);
-    setError(null);
-    fetch('/api/auth/magic-link/verify', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ token: magicToken })
-    })
-      .then(async (res) => {
-        const data = (await res.json()) as LoginResponse;
-        if (!res.ok) {
-          setError(data.error ?? '登录链接无效或已过期');
-          setBusy(false);
-          return;
-        }
-        router.push(next);
-        router.refresh();
+    const timer = setTimeout(() => {
+      setMode('magic');
+      setBusy(true);
+      setError(null);
+      fetch('/api/auth/magic-link/verify', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ token: magicToken })
       })
-      .catch((err) => {
-        setError((err as Error).message || '网络异常，请稍后重试');
-        setBusy(false);
-      });
+        .then(async (res) => {
+          const data = (await res.json()) as LoginResponse;
+          if (!res.ok) {
+            setError(data.error ?? '登录链接无效或已过期');
+            setBusy(false);
+            return;
+          }
+          router.push(next);
+          router.refresh();
+        })
+        .catch((err) => {
+          setError((err as Error).message || '网络异常，请稍后重试');
+          setBusy(false);
+        });
+    }, 0);
+    return () => clearTimeout(timer);
   }, [magicToken, router, next]);
 
   async function onPasswordSubmit(event: React.FormEvent<HTMLFormElement>) {

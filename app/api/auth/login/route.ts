@@ -14,7 +14,8 @@ import type { UserWithSecrets } from '@/lib/types';
 export const dynamic = 'force-dynamic';
 
 export async function POST(request: NextRequest) {
-  const body = await request.json().catch(() => ({}));
+  try {
+    const body = await request.json().catch(() => ({}));
   const parsed = loginSchema.safeParse(body);
   if (!parsed.success) {
     return NextResponse.json({ error: '表单校验失败', details: parsed.error.flatten() }, { status: 400 });
@@ -73,6 +74,13 @@ export async function POST(request: NextRequest) {
   publicView.last_login_at = new Date().toISOString();
 
   const res = NextResponse.json({ user: publicView });
-  res.headers.append('Set-Cookie', buildSessionCookie(signSessionToken(sessionId), { secure }));
-  return res;
+    res.headers.append('Set-Cookie', buildSessionCookie(signSessionToken(sessionId), { secure }));
+    return res;
+  } catch (err) {
+    console.error('login error', err);
+    return NextResponse.json(
+      { error: '登录服务异常，请稍后重试', detail: err instanceof Error ? err.message : String(err) },
+      { status: 500 }
+    );
+  }
 }
