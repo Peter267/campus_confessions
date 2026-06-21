@@ -22,7 +22,7 @@ export default async function HomePage() {
               校园万能墙
             </h1>
             <span className="hidden text-xs text-slate-400 sm:inline">·</span>
-            <span className="hidden text-xs text-slate-400 sm:inline">匿名公告板</span>
+            <span className="hidden text-xs text-slate-400 sm:inline">大家的事，大家说</span>
           </div>
         </div>
         <div className="flex shrink-0 items-center gap-2">

@@ -101,7 +101,7 @@ export function DetailClient({ post, comments }: { post: PostRecord; comments: C
         </article>
 
         <div className="rounded-[32px] border border-white/10 bg-white/6 p-6 backdrop-blur-xl">
-          <h3 className="mb-4 font-display text-2xl text-white">盖楼互动区</h3>
+          <h3 className="mb-4 font-display text-2xl text-white">留言区</h3>
           <form onSubmit={submitComment} className="space-y-4">
             <input
               value={authorName}
@@ -140,7 +140,7 @@ export function DetailClient({ post, comments }: { post: PostRecord; comments: C
                 </div>
               ))
             ) : (
-              <p className="text-sm text-slate-400">还没有人盖楼，来抢首评。</p>
+              <p className="text-sm text-slate-400">还没有留言，做第一个打招呼的人吧。</p>
             )}
           </div>
         </div>
