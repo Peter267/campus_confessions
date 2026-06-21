@@ -13,12 +13,14 @@ async function fetchPosts(strings: TemplateStringsArray, ...values: unknown[]) {
   return (await sql(strings, ...values)) as PostRecord[];
 }
 
-export async function listPublishedPosts(limit = 12, cursor?: string): Promise<FeedPage> {
+export async function listPublishedPosts(limit = 12, cursor?: string, category?: string | null): Promise<FeedPage> {
   const safeLimit = Math.min(Math.max(limit, 1), 24);
+  const cat = category?.trim() || null;
 
   if (!sql) {
     const ordered = [...demoPosts]
       .filter((item) => item.status === 'published')
+      .filter((item) => (cat ? item.category === cat : true))
       .sort((left, right) => new Date(right.created_at).getTime() - new Date(left.created_at).getTime());
     const cursorTime = cursor ? Number(cursor) : null;
     const filtered = cursorTime ? ordered.filter((item) => new Date(item.created_at).getTime() < cursorTime) : ordered;
@@ -28,21 +30,38 @@ export async function listPublishedPosts(limit = 12, cursor?: string): Promise<F
     return { items, nextCursor };
   }
 
+  // 分类作为参数化值传入，避免 SQL 注入
   const rows = cursor
-    ? await fetchPosts`
-        select *
-        from posts
-        where status = 'published' and created_at < to_timestamp(${Number(cursor)} / 1000.0)
-        order by created_at desc
-        limit ${safeLimit + 1}
-      `
-    : await fetchPosts`
-        select *
-        from posts
-        where status = 'published'
-        order by created_at desc
-        limit ${safeLimit + 1}
-      `;
+    ? cat
+      ? await fetchPosts`
+          select *
+          from posts
+          where status = 'published' and category = ${cat} and created_at < to_timestamp(${Number(cursor)} / 1000.0)
+          order by created_at desc
+          limit ${safeLimit + 1}
+        `
+      : await fetchPosts`
+          select *
+          from posts
+          where status = 'published' and created_at < to_timestamp(${Number(cursor)} / 1000.0)
+          order by created_at desc
+          limit ${safeLimit + 1}
+        `
+    : cat
+      ? await fetchPosts`
+          select *
+          from posts
+          where status = 'published' and category = ${cat}
+          order by created_at desc
+          limit ${safeLimit + 1}
+        `
+      : await fetchPosts`
+          select *
+          from posts
+          where status = 'published'
+          order by created_at desc
+          limit ${safeLimit + 1}
+        `;
 
   const items = rows.slice(0, safeLimit);
   const nextCursor = rows.length > safeLimit ? String(new Date(rows[safeLimit].created_at).getTime()) : null;
@@ -50,27 +69,39 @@ export async function listPublishedPosts(limit = 12, cursor?: string): Promise<F
   return { items, nextCursor };
 }
 
-export async function searchPosts(query: string, limit = 24): Promise<PostRecord[]> {
+export async function searchPosts(query: string, limit = 24, category?: string | null): Promise<PostRecord[]> {
   const safeLimit = Math.min(Math.max(limit, 1), 50);
   const safeQuery = `%${query.trim()}%`;
+  const cat = category?.trim() || null;
 
   if (!sql) {
     const q = query.trim().toLowerCase();
     return demoPosts
       .filter((item) => item.status === 'published')
+      .filter((item) => (cat ? item.category === cat : true))
       .filter((item) => item.content.toLowerCase().includes(q) || item.alias.toLowerCase().includes(q) || item.category.toLowerCase().includes(q))
       .sort((left, right) => new Date(right.created_at).getTime() - new Date(left.created_at).getTime())
       .slice(0, safeLimit);
   }
 
-  return await fetchPosts`
-    select *
-    from posts
-    where status = 'published'
-      and (content ilike ${safeQuery} or alias ilike ${safeQuery} or category ilike ${safeQuery})
-    order by created_at desc
-    limit ${safeLimit}
-  `;
+  return cat
+    ? await fetchPosts`
+        select *
+        from posts
+        where status = 'published'
+          and (content ilike ${safeQuery} or alias ilike ${safeQuery} or category ilike ${safeQuery})
+          and category = ${cat}
+        order by created_at desc
+        limit ${safeLimit}
+      `
+    : await fetchPosts`
+        select *
+        from posts
+        where status = 'published'
+          and (content ilike ${safeQuery} or alias ilike ${safeQuery} or category ilike ${safeQuery})
+        order by created_at desc
+        limit ${safeLimit}
+      `;
 }
 
 export async function listPendingPosts(limit = 24) {
@@ -120,6 +151,7 @@ export async function createPost(input: {
   category: string;
   alias: string;
   content: string;
+  contentHtml?: string | null;
   imageUrl?: string | null;
   status: PostStatus;
   moderationReason?: string | null;
@@ -135,6 +167,7 @@ export async function createPost(input: {
       author_name: input.alias,
       alias: input.alias,
       content: input.content,
+      content_html: input.contentHtml ?? null,
       image_url: input.imageUrl ?? null,
       moderation_reason: input.moderationReason ?? null,
       like_count: 0,
@@ -150,12 +183,13 @@ export async function createPost(input: {
   }
 
   const rows = (await sql`
-    insert into posts (category, alias, author_name, content, image_url, status, moderation_reason, published_at, ip_address)
+    insert into posts (category, alias, author_name, content, content_html, image_url, status, moderation_reason, published_at, ip_address)
     values (
       ${input.category},
       ${input.alias},
       ${input.alias},
       ${input.content},
+      ${input.contentHtml ?? null},
       ${input.imageUrl ?? null},
       ${input.status},
       ${input.moderationReason ?? null},
@@ -192,6 +226,27 @@ export async function setPostStatus(id: string, status: PostStatus, moderationRe
     set status = ${status},
         moderation_reason = ${moderationReason ?? null},
         published_at = ${status === 'published' ? new Date().toISOString() : null}
+    where id = ${id}
+    returning *
+  `) as PostRecord[];
+
+  return rows[0] ?? null;
+}
+
+// 管理员编辑帖子内容与分类。status 保持不变。
+export async function updatePostContent(id: string, data: { content: string; category: string }): Promise<PostRecord | null> {
+  if (!sql) {
+    const post = demoPosts.find((item) => item.id === id);
+    if (!post) return null;
+    post.content = data.content;
+    post.category = data.category;
+    return post;
+  }
+
+  const rows = (await sql`
+    update posts
+    set content = ${data.content},
+        category = ${data.category}
     where id = ${id}
     returning *
   `) as PostRecord[];
@@ -394,9 +449,47 @@ export async function createReport(postId: string, reason: string): Promise<Repo
   return rows[0];
 }
 
-export async function listReports(): Promise<ReportRecord[]> {
-  if (!sql) return [];
-  return await sql`select * from reports order by created_at desc` as ReportRecord[];
+export type ReportWithPost = ReportRecord & {
+  post_content: string | null;
+  post_category: string | null;
+  post_alias: string | null;
+  post_status: string | null;
+};
+
+export async function listReports(limit = 100): Promise<ReportWithPost[]> {
+  if (!sql) {
+    return demoPosts
+      .map((post) => ({
+        id: `demo-report-${post.id}`,
+        post_id: post.id,
+        reason: 'demo 预览',
+        created_at: post.created_at,
+        post_content: post.content,
+        post_category: post.category,
+        post_alias: post.alias,
+        post_status: post.status
+      }))
+      .slice(0, limit);
+  }
+  const safeLimit = Math.min(Math.max(limit, 1), 200);
+  return await sql`
+    select
+      r.id, r.post_id, r.reason, r.created_at,
+      p.content as post_content,
+      p.category as post_category,
+      p.alias as post_alias,
+      p.status as post_status
+    from reports r
+    left join posts p on p.id = r.post_id
+    order by r.created_at desc
+    limit ${safeLimit}
+  ` as ReportWithPost[];
+}
+
+export async function deleteReport(id: string): Promise<boolean> {
+  if (!sql) return true;
+  await sql`delete from reports where id = ${id}`;
+  return true;
 }
 
 // --- Audit Logs ---

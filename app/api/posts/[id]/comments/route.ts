@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { addComment, getModerationSettings } from '@/lib/posts';
 import { findBlockedKeyword, getBaseModerationSettings, resolveClientIp, sanitizeAlias } from '@/lib/moderation';
 import { commentSchema } from '@/lib/validators';
+import { sanitizeRichText, plainText } from '@/lib/sanitize';
 
 export const dynamic = 'force-dynamic';
 export const revalidate = 0;
@@ -35,15 +36,19 @@ export async function POST(
     return NextResponse.json({ error: '该代号已被封禁' }, { status: 403 });
   }
 
-  const blocked = findBlockedKeyword(parsed.data.content, moderationSettings.blocked_keywords);
+  // 富文本走 sanitize；纯文本走原 content。
+  const safeHtml = sanitizeRichText(parsed.data.contentHtml || parsed.data.content);
+  const plain = plainText(safeHtml) || parsed.data.content;
+
+  const blocked = findBlockedKeyword(plain, moderationSettings.blocked_keywords);
   if (blocked) {
     return NextResponse.json({ error: `评论包含敏感词：${blocked}` }, { status: 403 });
   }
 
   const comment = await addComment({
-    postId: id,                // ✅ 使用解构后的 id 代替原来的 params.id
+    postId: id,
     authorName,
-    content: parsed.data.content
+    content: plain
   });
 
   return NextResponse.json(comment);

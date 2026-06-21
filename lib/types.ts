@@ -9,6 +9,7 @@ export interface PostRecord {
   author_name: string;
   alias: string;
   content: string;
+  content_html: string | null;
   image_url: string | null;
   moderation_reason: string | null;
   like_count: number;

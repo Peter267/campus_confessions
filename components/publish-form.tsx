@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import type { PostCategory } from '@/lib/types';
+import { RichTextEditor } from '@/components/rich-text-editor';
 
 const categories: PostCategory[] = ['表白', '万能墙', '失物招领', '日常吐槽'];
 
@@ -43,11 +44,19 @@ async function uploadToR2(file: File, signal: AbortSignal): Promise<string> {
   return sign.publicUrl;
 }
 
+// 客户端把富文本转成纯文本，仅用于内容计数/敏感词客户端预提示。
+function toPlain(html: string): string {
+  if (typeof document === 'undefined') return html.replace(/<[^>]*>/g, '');
+  const div = document.createElement('div');
+  div.innerHTML = html;
+  return (div.textContent ?? '').trim();
+}
+
 export function PublishForm() {
   const router = useRouter();
   const [alias, setAlias] = useState('匿名同学');
   const [category, setCategory] = useState<PostCategory>('万能墙');
-  const [content, setContent] = useState('');
+  const [contentHtml, setContentHtml] = useState('');
   const [imageUrl, setImageUrl] = useState<string | null>(null);
   const [imagePreview, setImagePreview] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -62,9 +71,10 @@ export function PublishForm() {
     };
   }, []);
 
+  const plainContent = toPlain(contentHtml);
   const canSubmit = useMemo(
-    () => content.trim().length >= 10 && !busy && uploadStatus !== 'uploading' && uploadStatus !== 'signing',
-    [content, busy, uploadStatus]
+    () => plainContent.length >= 10 && plainContent.length <= 1200 && !busy && uploadStatus !== 'uploading' && uploadStatus !== 'signing',
+    [plainContent, busy, uploadStatus]
   );
 
   async function handleFile(file: File | null) {
@@ -120,7 +130,13 @@ export function PublishForm() {
     const response = await fetch('/api/posts', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ alias, category, content, imageUrl })
+      body: JSON.stringify({
+        alias,
+        category,
+        content: plainContent, // 服务端用 plain 做敏感词检查
+        contentHtml, // 服务端会 sanitize 后入库
+        imageUrl
+      })
     });
 
     const payload = await response.json();
@@ -165,16 +181,14 @@ export function PublishForm() {
         </label>
       </div>
 
-      <label className="block space-y-2">
-        <span className="text-sm text-slate-200">投稿内容</span>
-        <textarea
-          value={content}
-          onChange={(event) => setContent(event.target.value)}
-          rows={8}
-          className="w-full rounded-[28px] border border-white/10 bg-white/7 px-4 py-4 text-white outline-none transition placeholder:text-slate-500 focus:border-amber-300/50"
-          placeholder="写下你想发出的匿名表达，支持表白、失物招领、日常吐槽等"
+      <div className="space-y-2">
+        <span className="text-sm text-slate-200">投稿内容（支持富文本）</span>
+        <RichTextEditor
+          value={contentHtml}
+          onChange={setContentHtml}
+          placeholder="写下你想发出的匿名表达，可加粗、列表、引用、链接、图片等..."
         />
-      </label>
+      </div>
 
       <label
         className={`group block rounded-[28px] border border-dashed p-5 transition ${dragging ? 'border-cyan-200/70 bg-cyan-400/12' : 'border-cyan-200/30 bg-cyan-400/6 hover:bg-cyan-400/10'}`}

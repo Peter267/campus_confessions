@@ -4,7 +4,15 @@ import { useState } from 'react';
 import type { CategoryRecord, FeedPage } from '@/lib/types';
 import { HomeFeed } from '@/components/home-feed';
 
-export function HomeSection({ initialPage, categories }: { initialPage: FeedPage; categories: CategoryRecord[] }) {
+export function HomeSection({
+  initialPage,
+  categories,
+  category
+}: {
+  initialPage: FeedPage;
+  categories: CategoryRecord[];
+  category: string | null;
+}) {
   const [searchQuery, setSearchQuery] = useState('');
 
   return (
@@ -33,7 +41,11 @@ export function HomeSection({ initialPage, categories }: { initialPage: FeedPage
         </span>
       </div>
 
-      <HomeFeed initialPage={initialPage} searchQuery={searchQuery} />
+      <HomeFeed
+        initialPage={initialPage}
+        searchQuery={searchQuery}
+        category={category}
+      />
     </div>
   );
 }

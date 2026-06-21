@@ -1,16 +1,18 @@
 "use client";
 
 import Link from 'next/link';
-import { useSearchParams } from 'next/navigation';
 import type { CategoryRecord } from '@/lib/types';
 
-export function CategoryNav({ categories }: { categories: CategoryRecord[] }) {
-  const searchParams = useSearchParams();
-  const currentCategory = searchParams.get('category') ?? '';
-
+export function CategoryNav({
+  categories,
+  currentCategory
+}: {
+  categories: CategoryRecord[];
+  currentCategory: string | null;
+}) {
   function buildUrl(slug: string) {
     if (!slug) return '/';
-    return `/?category=${slug}`;
+    return `/?category=${encodeURIComponent(slug)}`;
   }
 
   return (

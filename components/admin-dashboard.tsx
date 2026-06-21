@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import type { AnnouncementRecord, AuditLogRecord, CategoryRecord, ModerationSettingsRecord, PostRecord } from '@/lib/types';
+import type { ReportWithPost } from '@/lib/posts';
 
 const TOKEN_STORAGE_KEY = 'campus:admin-token';
 
@@ -17,7 +18,7 @@ function authHeaders(token: string): HeadersInit {
   return { 'Content-Type': 'application/json', 'x-admin-token': token };
 }
 
-type Tab = 'pending' | 'published' | 'categories' | 'announcement' | 'rules' | 'logs';
+type Tab = 'pending' | 'published' | 'categories' | 'announcement' | 'rules' | 'logs' | 'reports';
 
 export function AdminDashboard({
   pendingPosts,
@@ -26,6 +27,7 @@ export function AdminDashboard({
   categories: initialCategories,
   announcement: initialAnnouncement,
   logs: initialLogs,
+  reports: initialReports
 }: {
   pendingPosts: PostRecord[];
   publishedPosts: PostRecord[];
@@ -33,6 +35,7 @@ export function AdminDashboard({
   categories: CategoryRecord[];
   announcement: AnnouncementRecord;
   logs: AuditLogRecord[];
+  reports: ReportWithPost[];
 }) {
   const [token, setToken] = useState('');
   const [tokenReady, setTokenReady] = useState(false);
@@ -48,6 +51,7 @@ export function AdminDashboard({
   const [aliases, setAliases] = useState(joinLines(settings.blocked_aliases));
   const [ips, setIps] = useState(joinLines(settings.blocked_ips));
   const [logs, setLogs] = useState(initialLogs);
+  const [reports, setReports] = useState(initialReports);
   const [notice, setNotice] = useState('');
   const [refreshing, setRefreshing] = useState<string | null>(null);
   const [adminSearch, setAdminSearch] = useState('');
@@ -57,6 +61,12 @@ export function AdminDashboard({
   // Category form state
   const [catForm, setCatForm] = useState({ name: '', slug: '', parent_id: '' });
   const [editingCatId, setEditingCatId] = useState<string | null>(null);
+
+  // Edit post modal state
+  const [editingPost, setEditingPost] = useState<PostRecord | null>(null);
+  const [editPostContent, setEditPostContent] = useState('');
+  const [editPostCategory, setEditPostCategory] = useState('');
+  const [editSaving, setEditSaving] = useState(false);
 
   // --- Token verification (keep existing logic) ---
   async function verifyToken(value: string): Promise<boolean> {
@@ -145,6 +155,16 @@ export function AdminDashboard({
     } catch { /* ignore */ }
   }
 
+  async function refreshReports() {
+    if (!token) return;
+    try {
+      const res = await fetch('/api/admin/reports', { headers: authHeaders(token) });
+      if (!res.ok) { if (res.status === 401) clearToken(); return; }
+      const data = (await res.json()) as { items: ReportWithPost[] };
+      setReports(data.items);
+    } catch { /* ignore */ }
+  }
+
   async function refreshSettings() {
     if (!token) return;
     try {
@@ -193,6 +213,72 @@ export function AdminDashboard({
     setPublished((current) => current.filter((item) => item.id !== id));
     if (adminSearchResults) setAdminSearchResults((current) => (current ?? []).filter((item) => item.id !== id));
     setNotice('帖子已删除');
+    await refreshLogs();
+  }
+
+  function openEditPost(post: PostRecord) {
+    setEditingPost(post);
+    setEditPostContent(post.content);
+    setEditPostCategory(post.category);
+  }
+
+  function closeEditPost() {
+    setEditingPost(null);
+    setEditPostContent('');
+    setEditPostCategory('');
+  }
+
+  async function saveEditedPost() {
+    if (!editingPost) return;
+    if (editPostContent.trim().length < 10 || editPostContent.trim().length > 1200) {
+      setNotice('内容长度需在 10 到 1200 个字符之间');
+      return;
+    }
+    if (!editPostCategory.trim()) {
+      setNotice('分类不能为空');
+      return;
+    }
+    setEditSaving(true);
+    try {
+      const res = await fetch(`/api/admin/posts/${editingPost.id}`, {
+        method: 'PUT',
+        headers: authHeaders(token),
+        body: JSON.stringify({ content: editPostContent.trim(), category: editPostCategory.trim() })
+      });
+      if (!res.ok) {
+        const payload = await res.json().catch(() => ({}));
+        setNotice(`保存失败：${payload.error ?? res.status}`);
+        if (res.status === 401) clearToken();
+        return;
+      }
+      const updated = (await res.json()) as PostRecord;
+      const apply = (list: PostRecord[]) => list.map((item) => (item.id === updated.id ? updated : item));
+      setPending(apply);
+      setPublished(apply);
+      if (adminSearchResults) setAdminSearchResults((current) => (current ?? []).map((item) => (item.id === updated.id ? updated : item)));
+      setNotice('帖子已更新');
+      closeEditPost();
+      await refreshLogs();
+    } finally {
+      setEditSaving(false);
+    }
+  }
+
+  async function dismissReport(id: string) {
+    if (!confirm('确定关闭此举报？')) return;
+    const res = await fetch('/api/admin/reports', {
+      method: 'DELETE',
+      headers: authHeaders(token),
+      body: JSON.stringify({ id })
+    });
+    if (!res.ok) {
+      const payload = await res.json().catch(() => ({}));
+      setNotice(`操作失败：${payload.error ?? res.status}`);
+      if (res.status === 401) clearToken();
+      return;
+    }
+    setReports((current) => current.filter((item) => item.id !== id));
+    setNotice('举报已关闭');
     await refreshLogs();
   }
 
@@ -309,6 +395,7 @@ export function AdminDashboard({
   const tabs: { key: Tab; label: string }[] = [
     { key: 'pending', label: '待审核' },
     { key: 'published', label: '已发布' },
+    { key: 'reports', label: `举报${reports.length > 0 ? ` (${reports.length})` : ''}` },
     { key: 'categories', label: '分类管理' },
     { key: 'announcement', label: '公告编辑' },
     { key: 'rules', label: '规则面板' },
@@ -359,6 +446,7 @@ export function AdminDashboard({
                 <div className="mt-4 flex flex-wrap gap-2">
                   <button onClick={() => void movePost(post.id, 'approve')} className="rounded-full bg-emerald-400/15 px-4 py-2 text-sm text-emerald-100 transition hover:bg-emerald-400/25">一键通过</button>
                   <button onClick={() => void movePost(post.id, 'reject')} className="rounded-full bg-rose-400/15 px-4 py-2 text-sm text-rose-100 transition hover:bg-rose-400/25">驳回</button>
+                  <button onClick={() => openEditPost(post)} className="rounded-full bg-amber-400/15 px-4 py-2 text-sm text-amber-100 transition hover:bg-amber-400/25">修改</button>
                   <button onClick={() => void deletePost(post.id, '管理员删除')} className="rounded-full bg-red-400/10 px-4 py-2 text-sm text-red-200 transition hover:bg-red-400/20">删除</button>
                 </div>
               </article>
@@ -390,6 +478,7 @@ export function AdminDashboard({
                 </div>
                 <p className="mt-2 line-clamp-3 whitespace-pre-wrap leading-6">{post.content}</p>
                 <div className="mt-3 flex gap-2">
+                  <button onClick={() => openEditPost(post)} className="rounded-full bg-amber-400/15 px-3 py-1 text-xs text-amber-100 transition hover:bg-amber-400/25">修改</button>
                   <button onClick={() => void deletePost(post.id, '管理员删除')} className="rounded-full bg-red-400/10 px-3 py-1 text-xs text-red-200 transition hover:bg-red-400/20">删除</button>
                 </div>
               </article>
@@ -465,6 +554,57 @@ export function AdminDashboard({
         </div>
       )}
 
+      {/* ============ REPORTS TAB ============ */}
+      {tab === 'reports' && (
+        <div className="rounded-[28px] border border-white/10 bg-white/6 p-6 backdrop-blur-xl">
+          <div className="mb-4 flex items-center justify-between">
+            <h3 className="font-display text-xl text-white">用户举报</h3>
+            <button onClick={() => void refreshReports()} className="rounded-full border border-white/10 bg-white/6 px-3 py-1 text-xs text-slate-200 transition hover:bg-white/10">刷新</button>
+          </div>
+          <div className="space-y-3 max-h-[600px] overflow-auto">
+            {reports.length === 0 ? (
+              <p className="text-sm text-slate-400">暂无举报。</p>
+            ) : null}
+            {reports.map((report) => (
+              <article key={report.id} className="rounded-[22px] border border-white/10 bg-slate-950/35 p-4 text-sm text-slate-100">
+                <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-slate-400">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="rounded-full border border-rose-300/20 bg-rose-300/10 px-2 py-0.5 text-rose-100">举报</span>
+                    <span>{new Date(report.created_at).toLocaleString('zh-CN')}</span>
+                    <span>·</span>
+                    <span className="text-slate-300">原因：{report.reason}</span>
+                  </div>
+                  <button onClick={() => void dismissReport(report.id)} className="rounded-full border border-white/10 px-3 py-1 text-xs text-slate-300 hover:bg-white/10">关闭</button>
+                </div>
+                <div className="mt-3 rounded-2xl border border-white/10 bg-slate-950/50 p-3">
+                  {report.post_content ? (
+                    <p className="whitespace-pre-wrap leading-6 text-slate-100">{report.post_content}</p>
+                  ) : (
+                    <p className="text-xs text-slate-500">原帖已删除</p>
+                  )}
+                  <div className="mt-2 text-xs text-slate-500">
+                    作者：{report.post_alias ?? '匿名'} · 分类：{report.post_category ?? '未知'} · 状态：{report.post_status ?? '未知'}
+                  </div>
+                </div>
+                {report.post_id && (report.post_status === 'published' || report.post_status === 'pending') ? (
+                  <div className="mt-2 flex justify-end">
+                    <button
+                      onClick={() => {
+                        const target = [...pending, ...published].find((p) => p.id === report.post_id);
+                        if (target) openEditPost(target);
+                      }}
+                      className="rounded-full border border-amber-300/30 bg-amber-300/10 px-3 py-1 text-xs text-amber-100 transition hover:bg-amber-300/20"
+                    >
+                      跳到原帖处理
+                    </button>
+                  </div>
+                ) : null}
+              </article>
+            ))}
+          </div>
+        </div>
+      )}
+
       {/* ============ LOGS TAB ============ */}
       {tab === 'logs' && (
         <div className="rounded-[28px] border border-white/10 bg-white/6 p-6 backdrop-blur-xl">
@@ -487,6 +627,55 @@ export function AdminDashboard({
           </div>
         </div>
       )}
+
+      {/* ============ EDIT POST MODAL ============ */}
+      {editingPost ? (
+        <div
+          role="dialog"
+          aria-modal="true"
+          className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/70 p-4"
+          onClick={(event) => {
+            if (event.target === event.currentTarget) closeEditPost();
+          }}
+        >
+          <div className="w-full max-w-2xl rounded-[28px] border border-white/10 bg-slate-950 p-6 shadow-2xl">
+            <div className="mb-4 flex items-center justify-between">
+              <h3 className="font-display text-xl text-white">修改帖子</h3>
+              <button onClick={closeEditPost} className="rounded-full border border-white/10 px-3 py-1 text-xs text-slate-300 hover:bg-white/10">关闭</button>
+            </div>
+            <div className="space-y-3">
+              <label className="block space-y-1">
+                <span className="text-xs text-slate-300">分类</span>
+                <input
+                  value={editPostCategory}
+                  onChange={(event) => setEditPostCategory(event.target.value)}
+                  className="w-full rounded-xl border border-white/10 bg-slate-950/40 px-3 py-2 text-sm text-white outline-none focus:border-cyan-300/50"
+                />
+              </label>
+              <label className="block space-y-1">
+                <span className="text-xs text-slate-300">内容（10 ~ 1200 字）</span>
+                <textarea
+                  value={editPostContent}
+                  onChange={(event) => setEditPostContent(event.target.value)}
+                  rows={10}
+                  className="w-full rounded-2xl border border-white/10 bg-slate-950/40 p-3 text-sm text-white outline-none focus:border-cyan-300/50"
+                />
+                <span className="text-[10px] text-slate-500">{editPostContent.trim().length} / 1200</span>
+              </label>
+            </div>
+            <div className="mt-4 flex justify-end gap-2">
+              <button onClick={closeEditPost} className="rounded-full border border-white/10 px-4 py-2 text-xs text-slate-300 hover:bg-white/10">取消</button>
+              <button
+                onClick={() => void saveEditedPost()}
+                disabled={editSaving}
+                className="rounded-full bg-gradient-to-r from-amber-300 to-cyan-300 px-5 py-2 text-xs font-semibold text-slate-950 disabled:opacity-50"
+              >
+                {editSaving ? '保存中…' : '保存修改'}
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 }

@@ -7,8 +7,14 @@ import { listPublishedPosts, getAnnouncement, listCategories } from '@/lib/posts
 export const dynamic = 'force-dynamic';
 export const revalidate = 0;
 
-export default async function HomePage() {
-  const initialPage = await listPublishedPosts(12);
+export default async function HomePage({
+  searchParams
+}: {
+  searchParams: Promise<{ category?: string | null; q?: string | null }>;
+}) {
+  const params = await searchParams;
+  const category = typeof params.category === 'string' && params.category.trim() ? params.category.trim() : null;
+  const initialPage = await listPublishedPosts(12, undefined, category);
   const announcement = await getAnnouncement();
   const categories = await listCategories();
 
@@ -34,13 +40,17 @@ export default async function HomePage() {
       </header>
 
       {/* Category nav bar */}
-      <CategoryNav categories={categories} />
+      <CategoryNav categories={categories} currentCategory={category} />
 
       {/* Main content area with sidebar */}
       <div className="flex flex-col gap-6 px-4 py-4 sm:px-6 lg:flex-row lg:px-8 lg:py-6">
         {/* Main feed */}
         <div className="min-w-0 flex-1">
-          <HomeSection initialPage={initialPage} categories={categories} />
+          <HomeSection
+            initialPage={initialPage}
+            categories={categories}
+            category={category}
+          />
         </div>
 
         {/* Sidebar - hidden on mobile, shown on lg+ */}

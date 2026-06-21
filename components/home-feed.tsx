@@ -5,7 +5,25 @@ import type { FeedPage, PostRecord } from '@/lib/types';
 import { PostCard } from '@/components/post-card';
 import { SkeletonCard } from '@/components/ui';
 
-export function HomeFeed({ initialPage, searchQuery }: { initialPage: FeedPage; searchQuery: string }) {
+function buildPostsUrl(params: { q?: string; cursor?: string | null; limit?: number; category?: string | null }) {
+  const search = new URLSearchParams();
+  if (params.q) search.set('q', params.q);
+  if (params.cursor) search.set('cursor', params.cursor);
+  if (params.limit) search.set('limit', String(params.limit));
+  if (params.category) search.set('category', params.category);
+  const qs = search.toString();
+  return `/api/posts${qs ? `?${qs}` : ''}`;
+}
+
+export function HomeFeed({
+  initialPage,
+  searchQuery,
+  category
+}: {
+  initialPage: FeedPage;
+  searchQuery: string;
+  category: string | null;
+}) {
   const [items, setItems] = useState<PostRecord[]>(initialPage.items);
   const [cursor, setCursor] = useState<string | null>(initialPage.nextCursor);
   const [loading, setLoading] = useState(false);
@@ -14,10 +32,19 @@ export function HomeFeed({ initialPage, searchQuery }: { initialPage: FeedPage; 
   const sentinelRef = useRef<HTMLDivElement | null>(null);
   const searchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
+  // 当父组件传入的 initialPage 变化（例如切换分类）时，把本地 items/cursor
+  // 重置为新数据。这是 "props 变化同步到本地 state" 的合法 use case。
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setItems(initialPage.items);
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setCursor(initialPage.nextCursor);
+  }, [initialPage]);
+
   const doSearch = useCallback(async (q: string) => {
     setSearchLoading(true);
     try {
-      const response = await fetch(`/api/posts?q=${encodeURIComponent(q)}`);
+      const response = await fetch(buildPostsUrl({ q, category }));
       if (!response.ok) return;
       const data = (await response.json()) as { items: PostRecord[] };
       setSearchResults(data.items);
@@ -26,7 +53,7 @@ export function HomeFeed({ initialPage, searchQuery }: { initialPage: FeedPage; 
     } finally {
       setSearchLoading(false);
     }
-  }, []);
+  }, [category]);
 
   // 搜索模式：防抖 300ms 后请求搜索接口
   useEffect(() => {
@@ -56,7 +83,7 @@ export function HomeFeed({ initialPage, searchQuery }: { initialPage: FeedPage; 
 
     setLoading(true);
     try {
-      const response = await fetch(`/api/posts?limit=12&cursor=${cursor}`, { signal });
+      const response = await fetch(buildPostsUrl({ cursor, limit: 12, category }), { signal });
       if (!response.ok) {
         return;
       }
@@ -70,7 +97,7 @@ export function HomeFeed({ initialPage, searchQuery }: { initialPage: FeedPage; 
     } finally {
       setLoading(false);
     }
-  }, [cursor, loading]);
+  }, [cursor, loading, category]);
 
   // 无限滚动（仅在非搜索模式）
   useEffect(() => {
@@ -122,6 +149,9 @@ export function HomeFeed({ initialPage, searchQuery }: { initialPage: FeedPage; 
 
   return (
     <>
+      {category ? (
+        <p className="text-xs text-slate-400">当前分类：<span className="text-slate-200">{category}</span> · 共 {items.length} 条</p>
+      ) : null}
       <div className="columns-1 gap-4 sm:columns-2 lg:columns-3 xl:columns-4">
         {items.map((post) => (
           <div key={post.id} className="mb-4 break-inside-avoid">

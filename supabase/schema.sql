@@ -43,6 +43,9 @@ on conflict (id) do nothing;
 -- IP address column for posts
 alter table posts add column if not exists ip_address text;
 
+-- Rich text content (sanitized HTML) for posts
+alter table posts add column if not exists content_html text;
+
 -- Categories table
 create table if not exists categories (
   id uuid primary key default gen_random_uuid(),

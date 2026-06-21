@@ -19,6 +19,12 @@ function toText(value: unknown) {
   return typeof value === 'string' ? value.trim() : '';
 }
 
+// 富文本场景下，需要把 HTML 标签剥掉得到纯文本以计算字符数。
+// 这是 length 校验的唯一依据，因为 <p>hello</p> 在视觉上只有 5 个字。
+function plainTextLength(value: string) {
+  return value.replace(/<[^>]*>/g, '').replace(/&nbsp;/g, ' ').trim().length;
+}
+
 function normalizeList(value: unknown) {
   if (Array.isArray(value)) {
     return value.map((item) => toText(item)).filter(Boolean);
@@ -31,11 +37,12 @@ function normalizeList(value: unknown) {
 }
 
 export const publishSchema = {
-  safeParse(input: unknown): ValidationResult<{ alias: string; category: '表白' | '万能墙' | '失物招领' | '日常吐槽'; content: string; imageUrl?: string | null }> {
+  safeParse(input: unknown): ValidationResult<{ alias: string; category: '表白' | '万能墙' | '失物招领' | '日常吐槽'; content: string; imageUrl?: string | null; contentHtml: string }> {
     const payload = input as Record<string, unknown>;
     const alias = toText(payload.alias);
     const category = toText(payload.category) as '表白' | '万能墙' | '失物招领' | '日常吐槽';
     const content = toText(payload.content);
+    const contentHtml = typeof payload.contentHtml === 'string' ? payload.contentHtml : '';
     const imageUrl = payload.imageUrl == null ? null : toText(payload.imageUrl);
 
     const fieldErrors: Record<string, string[]> = {};
@@ -48,7 +55,9 @@ export const publishSchema = {
       fieldErrors.category = ['分类标签不合法'];
     }
 
-    if (content.length < 10 || content.length > 1200) {
+    // 优先用 contentHtml 的纯文本长度，否则退回 content
+    const textLength = contentHtml ? plainTextLength(contentHtml) : content.length;
+    if (textLength < 10 || textLength > 1200) {
       fieldErrors.content = ['内容长度需在 10 到 1200 个字符之间'];
     }
 
@@ -60,26 +69,32 @@ export const publishSchema = {
       }
     }
 
-    return Object.keys(fieldErrors).length > 0 ? failure(fieldErrors) : success({ alias, category, content, imageUrl });
+    return Object.keys(fieldErrors).length > 0
+      ? failure(fieldErrors)
+      : success({ alias, category, content, imageUrl, contentHtml });
   }
 };
 
 export const commentSchema = {
-  safeParse(input: unknown): ValidationResult<{ authorName?: string; content: string }> {
+  safeParse(input: unknown): ValidationResult<{ authorName?: string; content: string; contentHtml: string }> {
     const payload = input as Record<string, unknown>;
     const authorName = toText(payload.authorName);
     const content = toText(payload.content);
+    const contentHtml = typeof payload.contentHtml === 'string' ? payload.contentHtml : '';
     const fieldErrors: Record<string, string[]> = {};
 
     if (authorName && authorName.length > 24) {
       fieldErrors.authorName = ['代号长度需在 1 到 24 个字符之间'];
     }
 
-    if (content.length < 2 || content.length > 400) {
+    const textLength = contentHtml ? plainTextLength(contentHtml) : content.length;
+    if (textLength < 2 || textLength > 400) {
       fieldErrors.content = ['评论长度需在 2 到 400 个字符之间'];
     }
 
-    return Object.keys(fieldErrors).length > 0 ? failure(fieldErrors) : success({ authorName: authorName || undefined, content });
+    return Object.keys(fieldErrors).length > 0
+      ? failure(fieldErrors)
+      : success({ authorName: authorName || undefined, content, contentHtml });
   }
 };
 

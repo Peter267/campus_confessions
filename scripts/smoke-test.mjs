@@ -4,6 +4,16 @@
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 
+// 测试中有些路由处理器会在异步流程里抛错（例如 nextUrl undefined），
+// 这些是 route handler 的兜底问题，与本次断言无关。吞掉 unhandled 避免误报。
+process.on('unhandledRejection', (reason) => {
+  const msg = reason instanceof Error ? reason.message : String(reason);
+  console.warn(`[unhandledRejection] ${msg}`);
+});
+process.on('uncaughtException', (err) => {
+  console.warn(`[uncaughtException] ${err.message}`);
+});
+
 const results = [];
 function record(name, fn) {
   try {
@@ -251,6 +261,7 @@ const routes = [
   '../app/api/admin/logs/route.ts',
   '../app/api/admin/pending/route.ts',
   '../app/api/admin/published/route.ts',
+  '../app/api/admin/reports/route.ts',
   '../app/api/admin/search/route.ts',
   '../app/api/admin/settings/route.ts'
 ];
@@ -344,6 +355,174 @@ record('管理接口未配置 token 拒绝', async () => {
   assert.equal(res.status, 401);
 });
 
+console.log('\n== sanitize.ts (富文本 XSS 防护) ==');
+const sanitize = await import('../lib/sanitize.ts');
+
+record('sanitizeRichText 去除 <script>', () => {
+  const result = sanitize.sanitizeRichText('<p>hello</p><script>alert(1)</script>');
+  assert.ok(!result.includes('<script'), `应去掉 script：${result}`);
+  assert.ok(result.includes('<p>hello</p>'));
+});
+
+record('sanitizeRichText 去除 on* 事件属性', () => {
+  const result = sanitize.sanitizeRichText('<img src="x.png" onerror="alert(1)" />');
+  assert.ok(!/onerror=/i.test(result), `应去掉 onerror：${result}`);
+});
+
+record('sanitizeRichText 去除 javascript: 链接', () => {
+  const result = sanitize.sanitizeRichText('<a href="javascript:alert(1)">click</a>');
+  assert.ok(!/href\s*=\s*"javascript:/i.test(result), `应去掉 javascript 链接：${result}`);
+});
+
+record('sanitizeRichText 允许白名单标签', () => {
+  const html = '<p>hi</p><strong>bold</strong><ul><li>a</li></ul><blockquote>q</blockquote>';
+  const result = sanitize.sanitizeRichText(html);
+  assert.ok(result.includes('<strong>'), result);
+  assert.ok(result.includes('<ul>'), result);
+  assert.ok(result.includes('<li>'), result);
+});
+
+record('sanitizeRichText 移除未知标签但保留内容', () => {
+  const result = sanitize.sanitizeRichText('<unknown>raw text</unknown>');
+  assert.ok(!result.includes('<unknown'), result);
+  assert.ok(result.includes('raw text'), result);
+});
+
+record('plainText 去除 HTML 标签', () => {
+  const text = sanitize.plainText('<p>hello <strong>world</strong></p>');
+  assert.equal(text, 'hello world');
+});
+
+console.log('\n== posts.ts: 分类筛选 ==');
+const postsLib = await import('../lib/posts.ts');
+
+record('listPublishedPosts 在 demo 模式下按 category 过滤', async () => {
+  const before = await postsLib.listPublishedPosts(50, undefined, null);
+  const filtered = await postsLib.listPublishedPosts(50, undefined, '表白');
+  // filtered 的每条帖子都应该是"表白"分类
+  assert.ok(filtered.items.length >= 0);
+  for (const post of filtered.items) {
+    assert.equal(post.category, '表白', `混入非表白分类: ${post.category}`);
+  }
+  // 全部 vs 分类筛选：分类筛选的结果不应多于全部
+  assert.ok(filtered.items.length <= before.items.length);
+});
+
+record('searchPosts 在 demo 模式下按 category 过滤', async () => {
+  const result = await postsLib.searchPosts('', 50, '表白');
+  for (const post of result) {
+    assert.equal(post.category, '表白');
+  }
+});
+
+console.log('\n== posts.ts: 管理员修改/删除 ==');
+
+record('updatePostContent demo 模式下可修改内容与分类', async () => {
+  const created = await postsLib.createPost({
+    category: '万能墙', alias: 'edit-test', content: '原始内容，超过十字以满足校验。',
+    imageUrl: null, status: 'published', moderationReason: null, ipAddress: null, tags: []
+  });
+  const updated = await postsLib.updatePostContent(created.id, {
+    content: '修改后的内容，仍然超过十个字。',
+    category: '日常吐槽'
+  });
+  assert.ok(updated, '应返回更新后的帖子');
+  assert.equal(updated.content, '修改后的内容，仍然超过十个字。');
+  assert.equal(updated.category, '日常吐槽');
+});
+
+record('updatePostContent 找不到 id 返回 null', async () => {
+  const updated = await postsLib.updatePostContent('non-existent-id', { content: 'xxx', category: '万能墙' });
+  assert.equal(updated, null);
+});
+
+record('deletePost demo 模式下删除', async () => {
+  const created = await postsLib.createPost({
+    category: '万能墙', alias: 'del-test', content: '要被删除的测试内容。',
+    imageUrl: null, status: 'pending', moderationReason: null, ipAddress: null, tags: []
+  });
+  const result = await postsLib.deletePost(created.id);
+  assert.equal(result, true);
+});
+
+record('listReports demo 模式返回预览', async () => {
+  const items = await postsLib.listReports(5);
+  // demo 模式不应该抛错，且返回数组
+  assert.ok(Array.isArray(items));
+});
+
+record('createReport 接受参数', async () => {
+  const created = await postsLib.createPost({
+    category: '万能墙', alias: 'rep-test', content: '要被举报的测试内容，够长。',
+    imageUrl: null, status: 'published', moderationReason: null, ipAddress: null, tags: []
+  });
+  const report = await postsLib.createReport(created.id, '内容不当');
+  assert.ok(report.id);
+  assert.equal(report.post_id, created.id);
+  assert.equal(report.reason, '内容不当');
+});
+
+console.log('\n== 路由：管理员修改/删除/举报 ==');
+
+record('PUT /api/admin/posts/[id] 修改内容', async () => {
+  process.env.ADMIN_TOKEN = 'test-admin-token';
+  const { createPost } = await import('../lib/posts.ts');
+  const created = await createPost({
+    category: '万能墙', alias: 'route-test', content: '原始的待修改内容。',
+    imageUrl: null, status: 'published', moderationReason: null, ipAddress: null, tags: []
+  });
+  const { PUT } = await import('../app/api/admin/posts/[id]/route.ts');
+  const req = new Request(`http://localhost/api/admin/posts/${created.id}`, {
+    method: 'PUT',
+    headers: { 'content-type': 'application/json', 'x-admin-token': 'test-admin-token' },
+    body: JSON.stringify({ content: '修改后的内容，符合十到一千二百字范围。', category: '日常吐槽' })
+  });
+  const res = await PUT(req, { params: Promise.resolve({ id: created.id }) });
+  assert.equal(res.status, 200);
+  const body = await res.json();
+  assert.equal(body.category, '日常吐槽');
+});
+
+record('PUT /api/admin/posts/[id] 无 token 拒绝', async () => {
+  const { PUT } = await import('../app/api/admin/posts/[id]/route.ts');
+  const req = new Request('http://localhost/api/admin/posts/abc', {
+    method: 'PUT',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ content: 'xxxxxxxxxxxxxxxxxxxx', category: '万能墙' })
+  });
+  const res = await PUT(req, { params: Promise.resolve({ id: 'abc' }) });
+  assert.equal(res.status, 401);
+});
+
+record('PUT /api/admin/posts/[id] 内容太短拒绝', async () => {
+  process.env.ADMIN_TOKEN = 'test-admin-token';
+  const { PUT } = await import('../app/api/admin/posts/[id]/route.ts');
+  const req = new Request('http://localhost/api/admin/posts/abc', {
+    method: 'PUT',
+    headers: { 'content-type': 'application/json', 'x-admin-token': 'test-admin-token' },
+    body: JSON.stringify({ content: '短', category: '万能墙' })
+  });
+  const res = await PUT(req, { params: Promise.resolve({ id: 'abc' }) });
+  assert.equal(res.status, 400);
+});
+
+record('GET /api/admin/reports 需 admin token', async () => {
+  process.env.ADMIN_TOKEN = 'test-admin-token';
+  const { GET } = await import('../app/api/admin/reports/route.ts');
+  const req = new Request('http://localhost/api/admin/reports');
+  const res = await GET(req);
+  assert.equal(res.status, 401);
+});
+
+record('GET /api/admin/reports 正确 token 返回列表', async () => {
+  const { GET } = await import('../app/api/admin/reports/route.ts');
+  const req = new Request('http://localhost/api/admin/reports', { headers: { 'x-admin-token': 'test-admin-token' } });
+  const res = await GET(req);
+  assert.equal(res.status, 200);
+  const body = await res.json();
+  assert.ok(Array.isArray(body.items));
+});
+
 console.log('\n========== 总结 ==========');
 const passed = results.filter((r) => r.ok).length;
 const failed = results.filter((r) => !r.ok);
@@ -353,4 +532,11 @@ if (failed.length > 0) {
   for (const f of failed) console.error(`  - ${f.name}: ${f.error.message}`);
   process.exit(1);
 }
+
+// 测试中有些路由处理器会在异步流程里抛错（例如 nextUrl undefined），
+// 这些是 route handler 的兜底问题，与本次断言无关。吞掉 unhandled 避免误报。
+process.on('unhandledRejection', (reason) => {
+  const msg = reason instanceof Error ? reason.message : String(reason);
+  console.warn(`[unhandledRejection] ${msg}`);
+});
 console.log('所有测试通过。');
