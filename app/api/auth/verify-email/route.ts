@@ -1,31 +1,25 @@
-// POST /api/auth/password/reset
-// 使用邮件里的 token 重置密码。
-// 成功后吊销该用户所有 session，强制所有设备重新登录。
+// POST /api/auth/verify-email
+// 使用邮件里的 token 验证邮箱。
+// 成功后更新 users.email_verified_at。
 import { NextRequest, NextResponse } from 'next/server';
 import { sql } from '@/lib/db';
-import { resetPasswordSchema } from '@/lib/auth-validators';
-import { hashPassword, validatePasswordStrength } from '@/lib/passwords';
+import { verifyEmailSchema } from '@/lib/auth-validators';
 
 export const dynamic = 'force-dynamic';
 
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json().catch(() => ({}));
-    const parsed = resetPasswordSchema.safeParse(body);
+    const parsed = verifyEmailSchema.safeParse(body);
     if (!parsed.success) {
       return NextResponse.json({ error: '表单校验失败', details: parsed.error.flatten() }, { status: 400 });
-    }
-
-    const passwordCheck = validatePasswordStrength(parsed.data.password);
-    if (!passwordCheck.valid) {
-      return NextResponse.json({ error: passwordCheck.reason }, { status: 400 });
     }
 
     if (!sql) {
       return NextResponse.json({ error: '数据库未配置' }, { status: 500 });
     }
 
-    // 消费 verification_token（一次性删除）
+    // 消费 verification_token
     const tokenRows = (await sql`
       delete from verification_tokens
       where token = ${parsed.data.token}
@@ -43,25 +37,14 @@ export async function POST(request: NextRequest) {
     }
 
     const email = tokenRow.identifier;
-    const newHash = await hashPassword(parsed.data.password);
-
-    // 更新密码 hash
-    const userRows = (await sql`
-      update users set password_hash = ${newHash}, updated_at = now()
+    await sql`
+      update users set email_verified_at = now(), updated_at = now()
       where lower(email) = lower(${email})
-      returning id
-    `) as { id: string }[];
-    if (!userRows[0]) {
-      return NextResponse.json({ error: '账号不存在' }, { status: 404 });
-    }
-    const userId = userRows[0].id;
+    `;
 
-    // 吊销所有已有 session（含当前设备）
-    await sql`delete from sessions where user_id = ${userId}::uuid`;
-
-    return NextResponse.json({ ok: true, next: '/login' });
+    return NextResponse.json({ ok: true });
   } catch (err) {
-    console.error('reset-password error', err);
+    console.error('verify-email error', err);
     return NextResponse.json(
       { error: '服务异常', detail: err instanceof Error ? err.message : String(err) },
       { status: 500 }

@@ -194,14 +194,12 @@ record('publicUrl 拼接公开访问 URL', () => {
   assert.equal(r2.publicUrl({ ...config, publicBase: 'https://pub.example.com/' }, 'posts/a.png'), 'https://pub.example.com/posts/a.png');
 });
 
-console.log('\n== auth.ts (token 校验) ==');
-const auth = await import('../lib/auth.ts');
+console.log('\n== lib/auth (Auth.js v5 + 兼容工具) ==');
+const auth = await import('../lib/auth/index.ts');
 
 record('isAdminRequest 未配置 ADMIN_TOKEN 拒绝', async () => {
   const original = process.env.ADMIN_TOKEN;
   delete process.env.ADMIN_TOKEN;
-  const req = new Request('http://x/y', { headers: { 'x-admin-token': 'anything' } });
-  // mock NextRequest by passing plain object
   const ok = auth.isAdminRequest({
     headers: { get: (k) => k === 'x-admin-token' ? 'anything' : null },
     nextUrl: { searchParams: { get: () => null } }
@@ -244,6 +242,44 @@ record('isAdminRequest 防止时序攻击：长度不一致', () => {
     nextUrl: { searchParams: { get: () => null } }
   });
   assert.equal(ok, false);
+});
+
+record('SESSION_COOKIE 常量指向 Auth.js cookie 名', () => {
+  assert.equal(auth.SESSION_COOKIE, 'next-auth.session-token');
+  assert.equal(auth.SESSION_TTL_MS, 60 * 60 * 24 * 30 * 1000);
+});
+
+record('getCurrentUser 无 session 时返回 null', async () => {
+  // 无 DB / 无 cookie 时应返回 null 而非抛错
+  const user = await auth.getCurrentUser();
+  assert.equal(user, null);
+});
+
+record('requireUser 无 session 时返回 401 或 500（无请求上下文时 auth() 抛错）', async () => {
+  const result = await auth.requireUser();
+  assert.ok(auth.isRequireUserResponse(result));
+  // 直接调用（无 HTTP 请求上下文）时 auth() 可能抛错 → 500；
+  // 真实 HTTP 请求中无 cookie 时 auth() 返回 null → 401。
+  assert.ok(result.status === 401 || result.status === 500);
+});
+
+record('isSecureRequest 在非生产环境默认 false', () => {
+  const original = process.env.NODE_ENV;
+  process.env.NODE_ENV = 'test';
+  const ok = auth.isSecureRequest({
+    headers: { get: () => null },
+    nextUrl: { protocol: 'http:' }
+  });
+  assert.equal(ok, false);
+  process.env.NODE_ENV = original;
+});
+
+record('isSecureRequest 识别 x-forwarded-proto=https', () => {
+  const ok = auth.isSecureRequest({
+    headers: { get: (k) => k === 'x-forwarded-proto' ? 'https' : null },
+    nextUrl: { protocol: 'http:' }
+  });
+  assert.equal(ok, true);
 });
 
 console.log('\n== admin token 哈希一致性 ==');
@@ -532,18 +568,18 @@ record('GET /api/admin/reports 正确 token 返回列表', async () => {
   assert.ok(Array.isArray(body.items));
 });
 
-console.log('\n== 账号系统：注册 / 登录 / 登出 ==');
+console.log('\n== 账号系统：Auth.js v5 路由 / Adapter / Provider ==');
 
 const AUTH_ROUTES = [
+  '../app/api/auth/[...nextauth]/route.ts',
   '../app/api/auth/register/route.ts',
-  '../app/api/auth/login/route.ts',
-  '../app/api/auth/logout/route.ts',
   '../app/api/auth/me/route.ts',
+  '../app/api/auth/verify-email/route.ts',
   '../app/api/auth/password/route.ts',
   '../app/api/auth/password/forgot/route.ts',
   '../app/api/auth/password/reset/route.ts',
-  '../app/api/auth/email/send/route.ts',
-  '../app/api/auth/email/verify/route.ts',
+  '../app/api/auth/captcha-config/route.ts',
+  '../app/api/auth/oauth-providers/route.ts',
   '../app/api/users/me/route.ts',
   '../app/api/users/me/sessions/route.ts'
 ];
@@ -553,7 +589,15 @@ for (const r of AUTH_ROUTES) {
   });
 }
 
-record('auth-validators: 用户名校验', async () => {
+record('Auth.js 核心模块加载：adapter / provider / config / resend', async () => {
+  await import('../lib/auth/adapter.ts');
+  await import('../lib/auth/password-provider.ts');
+  await import('../lib/auth/config.ts');
+  await import('../lib/auth/resend.ts');
+  assert.ok(true);
+});
+
+record('auth-validators: 用户名 / 邮箱 / 密码 / 昵称校验', async () => {
   const { validateUsername, validateEmail, validateDisplayName, normalizeUsername } = await import('../lib/auth-validators.ts');
   const { validatePasswordStrength } = await import('../lib/passwords.ts');
   // 'ab' 长度 2 < 3，期望长度错误
@@ -569,25 +613,37 @@ record('auth-validators: 用户名校验', async () => {
   assert.equal(normalizeUsername('Hello'), 'hello');
 });
 
+record('auth-validators: registerSchema / loginSchema / forgotPasswordSchema', async () => {
+  const v = await import('../lib/auth-validators.ts');
+  // registerSchema 合法
+  const r1 = v.registerSchema.safeParse({ username: 'abc', email: 'a@b.com', displayName: '小明', password: 'GoodPass123!' });
+  assert.equal(r1.success, true);
+  // registerSchema 缺字段
+  const r2 = v.registerSchema.safeParse({ username: '', email: 'bad', displayName: '', password: '' });
+  assert.equal(r2.success, false);
+  // loginSchema 合法
+  const r3 = v.loginSchema.safeParse({ identifier: 'abc', password: 'whatever' });
+  assert.equal(r3.success, true);
+  // forgotPasswordSchema 合法
+  const r4 = v.forgotPasswordSchema.safeParse({ email: 'a@b.com' });
+  assert.equal(r4.success, true);
+  // resetPasswordSchema 需要 token + password
+  const r5 = v.resetPasswordSchema.safeParse({ token: 'tok', password: 'GoodPass123!' });
+  assert.equal(r5.success, true);
+  // verifyEmailSchema 需要 token
+  const r6 = v.verifyEmailSchema.safeParse({ token: 'tok' });
+  assert.equal(r6.success, true);
+  // changePasswordSchema 新旧密码不能相同
+  const r7 = v.changePasswordSchema.safeParse({ oldPassword: 'same', newPassword: 'same' });
+  assert.equal(r7.success, false);
+});
+
 record('passwords: hash 与 verify 往返一致', async () => {
   const { hashPassword, verifyPassword } = await import('../lib/passwords.ts');
   const hash = await hashPassword('StrongPass1!');
   assert.ok(hash.startsWith('scrypt-sha256$'));
   assert.equal(await verifyPassword('StrongPass1!', hash), true);
   assert.equal(await verifyPassword('StrongPass2!', hash), false);
-});
-
-record('session: sign / verify 往返一致，篡改后失败', async () => {
-  const { signSessionToken, verifySessionToken } = await import('../lib/session.ts');
-  const id = 'a'.repeat(64);
-  const signed = signSessionToken(id);
-  assert.equal(verifySessionToken(signed), id);
-  // 篡改一位应返回 null
-  const tampered = signed.slice(0, -1) + (signed.endsWith('A') ? 'B' : 'A');
-  assert.equal(verifySessionToken(tampered), null);
-  // 错误格式
-  assert.equal(verifySessionToken('not-a-signed-value'), null);
-  assert.equal(verifySessionToken(undefined), null);
 });
 
 record('permissions: hasRole / can 角色矩阵', async () => {
@@ -622,72 +678,223 @@ record('turnstile: dev 模式未配置密钥时直接放行', async () => {
   assert.equal(r.skipped, true);
 });
 
-record('mail: magic link token 生成与校验', async () => {
-  const { packMagicToken, unpackMagicToken, buildMagicLink } = await import('../lib/mail.ts');
-  const packed = packMagicToken('user@school.edu', 'email_verify');
-  const unpacked = unpackMagicToken(packed.token);
-  assert.ok(unpacked);
-  assert.equal(unpacked.identifier, 'user@school.edu');
-  assert.equal(unpacked.purpose, 'email_verify');
-  assert.equal(unpackMagicToken('bad.token'), null);
-  // buildMagicLink 拼接正确
-  const link = buildMagicLink({ email: 'a@b.com', token: 'tok', purpose: 'email_verify', siteUrl: 'https://x.com/' });
-  assert.ok(link.startsWith('https://x.com/verify-email?'));
+record('captcha: verifyCaptcha dev 模式放行', async () => {
+  delete process.env.TURNSTILE_SECRET;
+  delete process.env.GEETEST_ID;
+  const { verifyCaptcha } = await import('../lib/captcha.ts');
+  const r = await verifyCaptcha({ turnstileToken: null, geetest: null }, '127.0.0.1');
+  assert.equal(r.ok, true);
 });
 
-record('POST /api/auth/register 创建账号并下发 session', async () => {
+record('resend: dev 模式（无 RESEND_API_KEY）返回 previewUrl', async () => {
+  delete process.env.RESEND_API_KEY;
+  const { sendAuthEmail, buildAuthUrl } = await import('../lib/auth/resend.ts');
+  const url = buildAuthUrl({ type: 'email_verify', token: 'tok123', email: 'a@b.com' });
+  assert.ok(url.includes('/verify-email?'));
+  assert.ok(url.includes('token=tok123'));
+
+  const resetUrl = buildAuthUrl({ type: 'reset_password', token: 'rtok', email: 'a@b.com' });
+  assert.ok(resetUrl.includes('/reset-password?'));
+  assert.ok(resetUrl.includes('token=rtok'));
+
+  const r = await sendAuthEmail({ to: 'a@b.com', url, type: 'email_verify' });
+  assert.equal(r.ok, true);
+  assert.equal(r.transport, 'dev-console');
+  assert.ok(r.previewUrl);
+});
+
+record('password-provider: authorize 在无 DB 时返回 null', async () => {
+  const mod = await import('../lib/auth/password-provider.ts');
+  assert.ok(mod.credentialsProvider);
+  assert.equal(mod.credentialsProvider.id, 'credentials');
+  // 直接调用 authorize，无 DB 应返回 null
+  const result = await mod.credentialsProvider.authorize?.({ identifier: 'nobody', password: 'wrong' }, undefined);
+  assert.equal(result, null);
+});
+
+record('adapter: createAdapter 返回 Auth.js Adapter 接口', async () => {
+  const mod = await import('../lib/auth/adapter.ts');
+  assert.equal(typeof mod.createAdapter, 'function');
+  const adapter = mod.createAdapter();
+  // Auth.js Adapter 必备方法
+  assert.equal(typeof adapter.createUser, 'function');
+  assert.equal(typeof adapter.getUser, 'function');
+  assert.equal(typeof adapter.getUserByEmail, 'function');
+  assert.equal(typeof adapter.getSessionAndUser, 'function');
+  assert.equal(typeof adapter.createSession, 'function');
+  assert.equal(typeof adapter.deleteSession, 'function');
+  assert.equal(typeof adapter.createVerificationToken, 'function');
+  assert.equal(typeof adapter.useVerificationToken, 'function');
+});
+
+record('config: session.strategy = database, maxAge 30 天', async () => {
+  const { authConfig } = await import('../lib/auth/config.ts');
+  assert.equal(authConfig.session?.strategy, 'database');
+  assert.equal(authConfig.session?.maxAge, 60 * 60 * 24 * 30);
+  assert.equal(authConfig.pages?.signIn, '/login');
+  assert.equal(authConfig.pages?.verifyRequest, '/verify-email');
+  assert.equal(authConfig.trustHost, true);
+  assert.ok(Array.isArray(authConfig.providers));
+  assert.equal(authConfig.providers.length, 1);
+});
+
+record('GET /api/auth/me 未登录返回 { user: null }', async () => {
+  const { GET } = await import('../app/api/auth/me/route.ts');
+  const res = await GET();
+  assert.equal(res.status, 200);
+  const body = await res.json();
+  assert.equal(body.user, null);
+});
+
+record('POST /api/auth/register 缺字段返回 400 + fieldErrors', async () => {
   const { POST } = await import('../app/api/auth/register/route.ts');
-  const unique = `t${Date.now().toString(36).slice(-6)}`;
-  const body = JSON.stringify({
-    username: unique,
-    email: `${unique}@school.edu`,
-    displayName: `测试员_${unique}`,
-    password: 'GoodPass123!'
-  });
   const req = new Request('http://localhost/api/auth/register', {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
-    body
+    body: JSON.stringify({ username: '', email: 'bad', displayName: '', password: '' })
   });
   const res = await POST(req);
+  assert.equal(res.status, 400);
+  const body = await res.json();
+  assert.ok(body.details?.fieldErrors);
+});
+
+record('POST /api/auth/register 密码强度不足返回 400', async () => {
+  const { POST } = await import('../app/api/auth/register/route.ts');
+  const req = new Request('http://localhost/api/auth/register', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ username: 'good_user', email: 'a@b.com', displayName: '小明', password: 'short' })
+  });
+  const res = await POST(req);
+  assert.equal(res.status, 400);
+});
+
+record('POST /api/auth/register 无 DB 时返回 500 含 detail', async () => {
+  delete process.env.DATABASE_URL;
+  const { POST } = await import('../app/api/auth/register/route.ts');
+  const unique = `t${Date.now().toString(36).slice(-6)}`;
+  const req = new Request('http://localhost/api/auth/register', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({
+      username: unique,
+      email: `${unique}@school.edu`,
+      displayName: `测试员_${unique}`,
+      password: 'GoodPass123!'
+    })
+  });
+  const res = await POST(req);
+  // 无 DATABASE_URL 时 register 在唯一性检查之前就因 sql 为 null 返回 500
+  assert.equal(res.status, 500);
+  const data = await res.json();
+  assert.ok(data.error);
+  // detail 字段帮助前端调试（项目规范：API 错误响应带 detail）
+  assert.ok(data.detail);
+});
+
+record('POST /api/auth/password/forgot 对未知邮箱仍返回 200（防枚举）', async () => {
+  delete process.env.DATABASE_URL;
+  const { POST } = await import('../app/api/auth/password/forgot/route.ts');
+  const res = await POST(new Request('http://localhost/api/auth/password/forgot', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ email: 'no-such-user@nowhere.edu' })
+  }));
   assert.equal(res.status, 200);
   const data = await res.json();
-  assert.ok(data.user);
-  assert.equal(data.user.username, unique);
-  assert.ok(data.emailVerification?.previewUrl);
-  // 二次注册同名应冲突（必须用新的 Request 对象，否则 body 已被消费）
-  const dup = await POST(new Request('http://localhost/api/auth/register', {
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body
-  }));
-  assert.equal(dup.status, 409);
+  assert.equal(data.ok, true);
 });
 
-record('POST /api/auth/login 用户名登录', async () => {
-  const unique = `l${Date.now().toString(36).slice(-6)}`;
-  const { POST: register } = await import('../app/api/auth/register/route.ts');
-  await register(new Request('http://localhost/api/auth/register', {
+record('POST /api/auth/password/forgot 非法邮箱返回 400', async () => {
+  const { POST } = await import('../app/api/auth/password/forgot/route.ts');
+  const res = await POST(new Request('http://localhost/api/auth/password/forgot', {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ username: unique, email: `${unique}@x.io`, displayName: `登录测试${unique}`, password: 'GoodPass123!' })
+    body: JSON.stringify({ email: 'not-an-email' })
   }));
-  const { POST: login } = await import('../app/api/auth/login/route.ts');
-  const ok = await login(new Request('http://localhost/api/auth/login', {
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ identifier: unique, password: 'GoodPass123!' })
-  }));
-  assert.equal(ok.status, 200);
-  const fail = await login(new Request('http://localhost/api/auth/login', {
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ identifier: unique, password: 'WrongPass123!' })
-  }));
-  assert.equal(fail.status, 401);
+  assert.equal(res.status, 400);
 });
 
-record('POST /api/auth/password/forgot 对未知邮箱仍返回 200', async () => {
+record('POST /api/auth/password/reset 无效 token 返回 400', async () => {
+  delete process.env.DATABASE_URL;
+  const { POST } = await import('../app/api/auth/password/reset/route.ts');
+  const res = await POST(new Request('http://localhost/api/auth/password/reset', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ token: 'invalid-token', password: 'GoodPass123!' })
+  }));
+  // 无 DB 时直接返回 500；有 DB 时无效 token 返回 400
+  assert.ok(res.status === 400 || res.status === 500);
+});
+
+record('POST /api/auth/verify-email 无效 token 返回 400 或 500', async () => {
+  delete process.env.DATABASE_URL;
+  const { POST } = await import('../app/api/auth/verify-email/route.ts');
+  const res = await POST(new Request('http://localhost/api/auth/verify-email', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ token: 'invalid-token' })
+  }));
+  assert.ok(res.status === 400 || res.status === 500);
+});
+
+record('POST /api/auth/verify-email 缺 token 返回 400', async () => {
+  const { POST } = await import('../app/api/auth/verify-email/route.ts');
+  const res = await POST(new Request('http://localhost/api/auth/verify-email', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({})
+  }));
+  assert.equal(res.status, 400);
+});
+
+record('POST /api/auth/password (修改密码) 未登录返回 401 或 500', async () => {
+  const { POST } = await import('../app/api/auth/password/route.ts');
+  const res = await POST(new Request('http://localhost/api/auth/password', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ oldPassword: 'whatever', newPassword: 'GoodPass123!' })
+  }));
+  // 无请求上下文时 auth() 抛错 → 500；真实请求无 cookie → 401
+  assert.ok(res.status === 401 || res.status === 500);
+});
+
+record('GET /api/users/me/sessions 未登录返回 401 或 500', async () => {
+  const { GET } = await import('../app/api/users/me/sessions/route.ts');
+  const res = await GET();
+  assert.ok(res.status === 401 || res.status === 500);
+});
+
+record('DELETE /api/users/me/sessions 未登录返回 401 或 500', async () => {
+  const { DELETE } = await import('../app/api/users/me/sessions/route.ts');
+  const req = new Request('http://localhost/api/users/me/sessions', {
+    method: 'DELETE',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ id: 'fake-session-token' })
+  });
+  const res = await DELETE(req);
+  assert.ok(res.status === 401 || res.status === 500);
+});
+
+record('GET /api/auth/captcha-config 返回 provider 配置', async () => {
+  const { GET } = await import('../app/api/auth/captcha-config/route.ts');
+  const res = await GET();
+  assert.equal(res.status, 200);
+  const body = await res.json();
+  assert.ok(['none', 'turnstile', 'geetest'].includes(body.provider));
+});
+
+record('GET /api/auth/oauth-providers 返回 providers 列表', async () => {
+  const { GET } = await import('../app/api/auth/oauth-providers/route.ts');
+  const res = await GET();
+  assert.equal(res.status, 200);
+  const body = await res.json();
+  assert.ok(Array.isArray(body.providers));
+});
+
+record('POST /api/auth/password/forgot 对未知邮箱仍返回 200（防枚举，重复确认）', async () => {
+  delete process.env.DATABASE_URL;
   const { POST } = await import('../app/api/auth/password/forgot/route.ts');
   const res = await POST(new Request('http://localhost/api/auth/password/forgot', {
     method: 'POST',

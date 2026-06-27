@@ -262,33 +262,13 @@ function ChangePasswordForm() {
 interface SessionItem {
   id: string;
   isCurrent: boolean;
-  created_at: string;
-  expires_at: string;
-  user_agent: string | null;
-  ip: string | null;
+  expires: string;
 }
 
 function SessionsList() {
   const [sessions, setSessions] = useState<SessionItem[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
-
-  async function load() {
-    setLoading(true);
-    try {
-      const res = await fetch('/api/users/me/sessions', { cache: 'no-store' });
-      const data = (await res.json()) as { sessions?: SessionItem[]; error?: string };
-      if (!res.ok) {
-        setError(data.error ?? '加载失败');
-      } else {
-        setSessions(data.sessions ?? []);
-      }
-    } catch (err) {
-      setError((err as Error).message);
-    } finally {
-      setLoading(false);
-    }
-  }
 
   useEffect(() => {
     let cancelled = false;
@@ -329,6 +309,9 @@ function SessionsList() {
   return (
     <div className="space-y-3 rounded-[28px] border border-white/12 bg-white/5 p-5 sm:p-6">
       <h3 className="font-display text-lg text-white">登录设备</h3>
+      <p className="text-xs text-slate-400">
+        列出当前账号所有活跃会话。Auth.js 数据库会话策略下，每个会话对应一个 session_token；可在此吊销其它设备。
+      </p>
       {error ? <p className="text-sm text-rose-300">{error}</p> : null}
       {loading ? <p className="text-sm text-slate-400">加载中…</p> : null}
       {!loading && sessions.length === 0 ? <p className="text-sm text-slate-400">暂无活跃会话</p> : null}
@@ -338,9 +321,10 @@ function SessionsList() {
             <div>
               <p className="text-sm text-white">
                 {s.isCurrent ? '当前设备' : '其他设备'}
-                {s.user_agent ? ` · ${s.user_agent.slice(0, 60)}` : ''}
               </p>
-              <p className="text-slate-400">IP {s.ip ?? '未知'} · 登录于 {new Date(s.created_at).toLocaleString('zh-CN')}</p>
+              <p className="text-slate-400">
+                过期于 {new Date(s.expires).toLocaleString('zh-CN')}
+              </p>
             </div>
             {!s.isCurrent ? (
               <button onClick={() => void revoke(s.id)} className="rounded-full border border-rose-300/30 px-3 py-1 text-rose-200 transition hover:bg-rose-500/15">

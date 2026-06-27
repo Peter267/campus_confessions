@@ -4,9 +4,11 @@ import { useRouter, useSearchParams } from 'next/navigation';
 import { useEffect, useRef, useState } from 'react';
 import { AuthShell, FormError, FormSuccess, PrimaryButton } from './auth-shell';
 
+// POST /api/auth/verify-email 返回结构
 interface VerifyResponse {
-  user?: { display_name: string; email_verified_at: string | null };
+  ok?: boolean;
   error?: string;
+  detail?: string;
 }
 
 export function VerifyEmailForm() {
@@ -30,19 +32,22 @@ export function VerifyEmailForm() {
     setError(null);
     setSuccess(null);
     try {
-      const res = await fetch('/api/auth/email/verify', {
+      const res = await fetch('/api/auth/verify-email', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ token })
       });
       const data = (await res.json()) as VerifyResponse;
       if (!res.ok) {
-        setError(data.error ?? '验证失败');
+        const detail = data.detail ? `（${data.detail}）` : '';
+        setError((data.error ?? '验证失败') + detail);
         setBusy(false);
         return;
       }
-      setSuccess('邮箱已验证，即将跳转到个人主页...');
-      setTimeout(() => router.push('/profile'), 800);
+      // 邮箱验证成功：邮箱已激活，引导到 /login（如果用户尚未登录）。
+      // 用户若已登录会由 middleware 自动放行，跳到 /profile 即可。
+      setSuccess('邮箱已验证，即将跳转到登录页…');
+      setTimeout(() => router.push('/login'), 1000);
     } catch (err) {
       setError((err as Error).message || '网络异常，请稍后重试');
       setBusy(false);

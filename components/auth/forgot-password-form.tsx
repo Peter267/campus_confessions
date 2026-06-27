@@ -5,12 +5,13 @@ import { useState } from 'react';
 import { AuthShell, Field, FormError, FormSuccess, PrimaryButton, TextInput } from './auth-shell';
 import { Captcha, type CaptchaResult } from './captcha';
 
+// POST /api/auth/password/forgot 返回结构（dev 模式下携带 previewUrl）
 interface ForgotResponse {
   ok?: boolean;
   error?: string;
+  detail?: string;
   transport?: string;
   previewUrl?: string;
-  previewToken?: string;
 }
 
 export function ForgotPasswordForm() {
@@ -31,11 +32,16 @@ export function ForgotPasswordForm() {
       const res = await fetch('/api/auth/password/forgot', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email, turnstileToken: captchaResult?.turnstileToken ?? undefined, geetest: captchaResult?.geetest ?? undefined })
+        body: JSON.stringify({
+          email,
+          turnstileToken: captchaResult?.turnstileToken ?? undefined,
+          geetest: captchaResult?.geetest ?? undefined
+        })
       });
       const data = (await res.json()) as ForgotResponse;
       if (!res.ok) {
-        setError(data.error ?? '申请失败');
+        const detail = data.detail ? `（${data.detail}）` : '';
+        setError((data.error ?? '申请失败') + detail);
         setBusy(false);
         return;
       }
@@ -61,7 +67,7 @@ export function ForgotPasswordForm() {
       <form onSubmit={onSubmit} className="space-y-4">
         <FormError message={error} />
         <FormSuccess message={success} />
-        <Field label="邮箱" error={null}>
+        <Field label="邮箱">
           <TextInput
             name="email"
             type="email"

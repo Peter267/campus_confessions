@@ -3,6 +3,7 @@
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useEffect, useRef, useState } from 'react';
+import { signOut } from 'next-auth/react';
 import type { UserRecord } from '@/lib/types';
 import { ROLE_LABELS } from '@/lib/permissions';
 
@@ -22,11 +23,20 @@ export function UserMenu({ initialUser }: { initialUser: UserRecord | null }) {
     return () => document.removeEventListener('mousedown', onClick);
   }, []);
 
+  // 监听路由变化时刷新 user 状态（页面跳转后 layout 可能注入新 user）
+  // 此处依赖父组件传入 initialUser；登录/登出后 router.refresh() 会重新执行 server component
+  useEffect(() => {
+    setUser(initialUser);
+  }, [initialUser]);
+
   async function logout() {
-    await fetch('/api/auth/logout', { method: 'POST' });
+    // Auth.js v5：signOut({ redirect: false }) 仅清理 cookie，不强制跳转
+    await signOut({ redirect: false });
     setUser(null);
     setOpen(false);
     router.refresh();
+    // 跳回首页，避免停在需要登录的页面
+    router.push('/');
   }
 
   if (!user) {

@@ -1,11 +1,11 @@
 // 限流工具
 // ---------------------------------------------------------------------------
 // 简单的滑动窗口实现：记录每次请求到 rate_limit_events 表，
-// 计数窗口内事件数决定是否拦截。开发模式用内存版（demo-auth）。
+// 计数窗口内事件数决定是否拦截。
+// 无 DATABASE_URL 时回退到进程内内存计数（仅适用于单实例 dev / 测试）。
 // ---------------------------------------------------------------------------
 
 import { sql } from './db';
-import { demoAddRateEvent, demoCountRateEvents } from './demo-auth';
 
 export interface RateLimitConfig {
   bucket: string; // 例如 'auth:login'
@@ -18,6 +18,33 @@ export interface RateLimitResult {
   allowed: boolean;
   remaining: number;
   resetMs: number; // 距下一次可重试的毫秒数
+}
+
+// 内存模式：bucket+identifier -> 时间戳数组
+const memoryEvents = new Map<string, number[]>();
+
+function memoryKey(bucket: string, identifier: string) {
+  return `${bucket}::${identifier}`;
+}
+
+function memoryCount(bucket: string, identifier: string, windowMs: number): number {
+  const key = memoryKey(bucket, identifier);
+  const now = Date.now();
+  const cutoff = now - windowMs;
+  const arr = (memoryEvents.get(key) ?? []).filter((t) => t > cutoff);
+  memoryEvents.set(key, arr);
+  return arr.length;
+}
+
+function memoryAdd(bucket: string, identifier: string) {
+  const key = memoryKey(bucket, identifier);
+  const arr = memoryEvents.get(key) ?? [];
+  arr.push(Date.now());
+  memoryEvents.set(key, arr);
+}
+
+function memoryClear(bucket: string, identifier: string) {
+  memoryEvents.delete(memoryKey(bucket, identifier));
 }
 
 export async function hitRateLimit(config: RateLimitConfig): Promise<RateLimitResult> {
@@ -42,17 +69,19 @@ export async function hitRateLimit(config: RateLimitConfig): Promise<RateLimitRe
     `;
     return { allowed: true, remaining: config.max - rows.length - 1, resetMs: config.windowMs };
   }
-  const used = demoCountRateEvents(config.bucket, config.identifier, config.windowMs);
+  const used = memoryCount(config.bucket, config.identifier, config.windowMs);
   if (used >= config.max) {
     return { allowed: false, remaining: 0, resetMs: config.windowMs };
   }
-  demoAddRateEvent(config.bucket, config.identifier);
+  memoryAdd(config.bucket, config.identifier);
   return { allowed: true, remaining: config.max - used - 1, resetMs: config.windowMs };
 }
 
 export async function clearRateLimit(bucket: string, identifier: string) {
   if (sql) {
     await sql`delete from rate_limit_events where bucket = ${bucket} and identifier = ${identifier}`;
+  } else {
+    memoryClear(bucket, identifier);
   }
 }
 

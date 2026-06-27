@@ -2,22 +2,25 @@
 
 import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import { AuthShell, Field, FormError, FormSuccess, PrimaryButton, TextInput } from './auth-shell';
-import { OauthButtons } from './oauth-buttons';
 import { Captcha, type CaptchaResult } from './captcha';
 
+// POST /api/auth/register 返回结构
 interface RegisterResponse {
-  user?: { id: string; display_name: string; email: string | null };
+  ok?: boolean;
+  user?: { id: string; username: string; email: string; display_name: string };
   error?: string;
+  detail?: string;
   details?: { fieldErrors?: Record<string, string[]> };
-  emailVerification?: { sent: boolean; transport: string; previewUrl?: string; previewToken?: string };
+  emailVerification?: { sent: boolean; transport: string; previewUrl?: string };
+  next?: string;
 }
 
 export function RegisterForm() {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const next = searchParams.get('next') ?? '/profile';
+  const next = searchParams.get('next') ?? '/login';
 
   const [username, setUsername] = useState('');
   const [email, setEmail] = useState('');
@@ -29,25 +32,6 @@ export function RegisterForm() {
   const [success, setSuccess] = useState<string | null>(null);
   const [previewLink, setPreviewLink] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
-  const [oauthProviders, setOauthProviders] = useState<string[]>([]);
-
-  useEffect(() => {
-    fetch('/api/auth/oauth-providers', { cache: 'no-store' })
-      .then((res) => res.json())
-      .then((data: { providers?: { provider: string }[] }) => {
-        if (data.providers) setOauthProviders(data.providers.map((p) => p.provider));
-      })
-      .catch(() => undefined);
-  }, []);
-
-  useEffect(() => {
-    fetch('/api/auth/me', { cache: 'no-store' })
-      .then((res) => res.json())
-      .then((data: { user?: unknown }) => {
-        if (data.user) router.replace(next);
-      })
-      .catch(() => undefined);
-  }, [router, next]);
 
   async function onSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -60,19 +44,31 @@ export function RegisterForm() {
       const res = await fetch('/api/auth/register', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ username, email, displayName, password, turnstileToken: captchaResult?.turnstileToken ?? undefined, geetest: captchaResult?.geetest ?? undefined })
+        body: JSON.stringify({
+          username,
+          email,
+          displayName,
+          password,
+          turnstileToken: captchaResult?.turnstileToken ?? undefined,
+          geetest: captchaResult?.geetest ?? undefined
+        })
       });
       const data = (await res.json()) as RegisterResponse;
       if (!res.ok) {
-        setError(data.error ?? '注册失败');
+        const detail = data.detail ? `（${data.detail}）` : '';
+        setError((data.error ?? '注册失败') + detail);
         if (data.details?.fieldErrors) setFieldErrors(data.details.fieldErrors);
         setBusy(false);
         return;
       }
-      setSuccess('注册成功，已自动登录！请到邮箱完成验证。');
+      // 注册成功：账号已落库，但不在此处自动登录（Auth.js cookie 设置复杂），
+      // 引导用户去 /login 用 Auth.js signIn 完成。
+      setSuccess('注册成功！请使用刚注册的账号登录。');
       if (data.emailVerification?.previewUrl) setPreviewLink(data.emailVerification.previewUrl);
       setBusy(false);
-      setTimeout(() => router.push(next), 800);
+      // 跳到 /login，让用户用 Auth.js 完成 signIn
+      const target = data.next ?? next;
+      setTimeout(() => router.push(target), 1000);
     } catch (err) {
       setError((err as Error).message || '网络异常，请稍后重试');
       setBusy(false);
@@ -148,7 +144,6 @@ export function RegisterForm() {
           </p>
         ) : null}
       </form>
-      <OauthButtons next={next} enabledProviders={oauthProviders} />
     </AuthShell>
   );
 }

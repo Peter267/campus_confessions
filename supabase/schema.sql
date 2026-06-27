@@ -140,50 +140,53 @@ create index if not exists users_role_idx on users (role);
 alter table posts add column if not exists user_id uuid references users(id) on delete set null;
 alter table posts add column if not exists is_anonymous boolean not null default true;
 
--- Sessions: id is a random 32-byte hex token (also the cookie value).
--- The hashed form is stored in token_hash for fast lookup / 撤销。
-create table if not exists sessions (
-  id text primary key,
+-- =========================================================================
+-- Auth.js v5 (NextAuth) 表结构
+--   - sessions: session_token 是 Auth.js 颁发的会话令牌
+--   - verification_tokens: 邮箱验证 / 密码重置 / 魔法链接 token
+--   - accounts: OAuth 第三方登录用（即使现在不启用也提前预留）
+-- 注：旧表（旧 sessions / verification_codes / password_resets）由
+-- scripts/migrate-to-authjs.mjs 负责 DROP 后再创建新表，避免冲突。
+-- =========================================================================
+
+-- accounts: OAuth provider 账号关联（Auth.js 标准 schema）
+create table if not exists accounts (
+  id uuid primary key default gen_random_uuid(),
   user_id uuid not null references users(id) on delete cascade,
-  token_hash text not null default '',
-  user_agent text,
-  ip text,
-  expires_at timestamptz not null,
-  created_at timestamptz not null default now()
+  type text not null,
+  provider text not null,
+  provider_account_id text not null,
+  refresh_token text,
+  access_token text,
+  expires_at bigint,
+  token_type text,
+  scope text,
+  id_token text,
+  session_state text,
+  constraint accounts_provider_unique unique (provider, provider_account_id)
+);
+
+create index if not exists accounts_user_id_idx on accounts (user_id);
+
+-- sessions: Auth.js 标准 schema，session_token 作为主键
+create table if not exists sessions (
+  session_token text primary key,
+  user_id uuid not null references users(id) on delete cascade,
+  expires timestamptz not null
 );
 
 create index if not exists sessions_user_id_idx on sessions (user_id);
-create index if not exists sessions_expires_at_idx on sessions (expires_at);
+create index if not exists sessions_expires_idx on sessions (expires);
 
--- Verification codes: email magic link / future SMS, single table for both
-create table if not exists verification_codes (
-  id uuid primary key default gen_random_uuid(),
+-- verification_tokens: 用于邮箱验证、密码重置、魔法链接
+create table if not exists verification_tokens (
   identifier text not null,
-  purpose text not null check (purpose in ('email_verify', 'email_magic', 'reset_password', 'login_magic')),
-  code_hash text not null,
-  token_hash text not null default '',
-  payload jsonb,
-  attempts int not null default 0,
-  consumed_at timestamptz,
-  expires_at timestamptz not null,
-  created_at timestamptz not null default now()
+  token text not null,
+  expires timestamptz not null,
+  primary key (identifier, token)
 );
 
-create index if not exists verification_codes_identifier_idx on verification_codes (identifier, purpose);
-create index if not exists verification_codes_expires_at_idx on verification_codes (expires_at);
-
--- Password reset tokens: dedicated long-lived token separate from codes
-create table if not exists password_resets (
-  id uuid primary key default gen_random_uuid(),
-  user_id uuid not null references users(id) on delete cascade,
-  token_hash text not null default '',
-  expires_at timestamptz not null,
-  used_at timestamptz,
-  created_at timestamptz not null default now()
-);
-
-create index if not exists password_resets_user_id_idx on password_resets (user_id);
-create index if not exists password_resets_expires_at_idx on password_resets (expires_at);
+create index if not exists verification_tokens_expires_idx on verification_tokens (expires);
 
 -- Rate limit: counter window for sensitive endpoints
 create table if not exists rate_limit_events (

@@ -4,10 +4,13 @@ import { useRouter, useSearchParams } from 'next/navigation';
 import { useState } from 'react';
 import { AuthShell, Field, FormError, FormSuccess, PrimaryButton, TextInput } from './auth-shell';
 
+// POST /api/auth/password/reset 返回结构
+// 成功后所有 session 被吊销，需引导到 /login 重新登录
 interface ResetResponse {
   ok?: boolean;
-  user?: { id: string; display_name: string };
+  next?: string;
   error?: string;
+  detail?: string;
   details?: { fieldErrors?: Record<string, string[]> };
 }
 
@@ -44,13 +47,16 @@ export function ResetPasswordForm() {
       });
       const data = (await res.json()) as ResetResponse;
       if (!res.ok) {
-        setError(data.error ?? '重置失败');
+        const detail = data.detail ? `（${data.detail}）` : '';
+        setError((data.error ?? '重置失败') + detail);
         if (data.details?.fieldErrors) setFieldErrors(data.details.fieldErrors);
         setBusy(false);
         return;
       }
-      setSuccess('密码已更新，正在带你进入个人主页...');
-      setTimeout(() => router.push('/profile'), 800);
+      // 密码重置成功：所有 session 已被吊销，引导去 /login 重新登录
+      setSuccess('密码已更新，请使用新密码重新登录。');
+      const target = data.next ?? '/login';
+      setTimeout(() => router.push(target), 1000);
     } catch (err) {
       setError((err as Error).message || '网络异常，请稍后重试');
       setBusy(false);
@@ -78,7 +84,7 @@ export function ResetPasswordForm() {
             placeholder="请输入新的密码"
           />
         </Field>
-        <Field label="确认密码" error={null}>
+        <Field label="确认密码">
           <TextInput
             name="confirm"
             type="password"
