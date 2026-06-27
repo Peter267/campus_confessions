@@ -76,8 +76,8 @@ export async function createVerificationCode(input: CreateCodeInput): Promise<Ve
       where identifier = ${input.identifier} and purpose = ${input.purpose} and consumed_at is null
     `;
     const rows = (await sql`
-      insert into verification_codes (identifier, purpose, code_hash, payload, expires_at)
-      values (${input.identifier}, ${input.purpose}, ${codeHash}, ${payloadJson}::jsonb, ${expiresAt.toISOString()})
+      insert into verification_codes (identifier, purpose, code_hash, token_hash, payload, expires_at)
+      values (${input.identifier}, ${input.purpose}, ${codeHash}, ${input.identifier}, ${payloadJson}::jsonb, ${expiresAt.toISOString()})
       returning *
     `) as Record<string, unknown>[];
     return rowToCode(rows[0]);

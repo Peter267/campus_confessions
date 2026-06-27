@@ -32,8 +32,8 @@ export async function createSession(input: {
 }): Promise<SessionRecord> {
   if (sql) {
     const rows = (await sql`
-      insert into sessions (id, user_id, user_agent, ip, expires_at)
-      values (${input.id}, ${input.userId}, ${input.userAgent ?? null}, ${input.ip ?? null}, ${input.expiresAt.toISOString()})
+      insert into sessions (id, user_id, token_hash, user_agent, ip, expires_at)
+      values (${input.id}, ${input.userId}, ${input.userId}, ${input.userAgent ?? null}, ${input.ip ?? null}, ${input.expiresAt.toISOString()})
       returning *
     `) as Record<string, unknown>[];
     return rowToSession(rows[0]);
